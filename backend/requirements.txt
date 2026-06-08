@@ -1,0 +1,6 @@
+pymongo[srv]==4.6.1
+fastapi==0.110.0
+uvicorn==0.28.0
+python-dotenv==1.0.1
+pydantic==2.6.4
+google-antigravity==2.0.0
