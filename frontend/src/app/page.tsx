@@ -34,6 +34,13 @@ const API_BASE = typeof window !== "undefined" && window.location.hostname === "
   ? "http://localhost:8000"
   : (process.env.NEXT_PUBLIC_API_URL || "https://surge-agent.onrender.com");
 
+const parseTimestamp = (ts: string) => {
+  if (ts && ts.includes("T") && !/[Zz]|[+-]\d{2}(?::?\d{2})?$/.test(ts)) {
+    return ts + "Z";
+  }
+  return ts;
+};
+
 // Mock data for offline mode
 const INITIAL_MOCK_STORES: Store[] = [
   {
@@ -140,7 +147,7 @@ export default function Home() {
           
           const now = Date.now();
           const filteredPromos = mockPromotionsRef.current.filter(promo => {
-            const start = new Date(promo.timestamp).getTime();
+            const start = new Date(parseTimestamp(promo.timestamp)).getTime();
             const durationMs = promo.duration_minutes * 60 * 1000;
             return now - start < durationMs;
           });
@@ -350,7 +357,7 @@ export default function Home() {
       }
     }
 
-    const timeStr = new Date(log.timestamp).toLocaleTimeString([], { hour12: false });
+    const timeStr = new Date(parseTimestamp(log.timestamp)).toLocaleTimeString([], { hour12: false });
 
     return (
       <div key={index} className="py-1.5 border-b border-zinc-900/60 hover:bg-zinc-900/20 transition-colors flex items-start gap-2.5 text-[11px] font-mono leading-relaxed">
@@ -370,7 +377,7 @@ export default function Home() {
   };
 
   const getRemainingSeconds = (promo: Promotion) => {
-    const start = new Date(promo.timestamp).getTime();
+    const start = new Date(parseTimestamp(promo.timestamp)).getTime();
     const durationMs = promo.duration_minutes * 60 * 1000;
     const elapsed = Date.now() - start;
     return Math.max(0, Math.floor((durationMs - elapsed) / 1000));
