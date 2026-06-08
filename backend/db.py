@@ -6,8 +6,17 @@ load_dotenv()
 
 MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017/surge_db")
 
-client = MongoClient(MONGODB_URI)
+import certifi
+
+if "mongodb+srv://" in MONGODB_URI:
+    client = MongoClient(MONGODB_URI, tlsCAFile=certifi.where())
+else:
+    client = MongoClient(MONGODB_URI)
+    
 db_name = MONGODB_URI.split("/")[-1].split("?")[0] or "surge_db"
+# Clear parameters out of database name if it was parsed from the root connection path
+if "?" in db_name:
+    db_name = db_name.split("?")[0]
 db = client[db_name]
 
 def init_db():
