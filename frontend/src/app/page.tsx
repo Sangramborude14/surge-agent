@@ -30,7 +30,9 @@ interface LogEntry {
   message: string;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://surge-agent.onrender.com";
+const API_BASE = typeof window !== "undefined" && window.location.hostname === "localhost"
+  ? "http://localhost:8000"
+  : (process.env.NEXT_PUBLIC_API_URL || "https://surge-agent.onrender.com");
 
 // Mock data for offline mode
 const INITIAL_MOCK_STORES: Store[] = [
