@@ -30,8 +30,7 @@ interface LogEntry {
   message: string;
 }
 
-// Read API URL from environment variables for deployment readiness, fallback to localhost:8000
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://surge-agent.onrender.com";
 
 // Mock data for offline mode
 const INITIAL_MOCK_STORES: Store[] = [

@@ -7,7 +7,9 @@ import urllib.error
 ZONE_A = [121.501, 31.240]
 ZONE_B = [121.515, 31.245]
 
-API_URL = "http://127.0.0.1:8000/api/surge"
+import os
+
+API_URL = os.getenv("API_URL", "https://surge-agent.onrender.com/api/surge")
 
 def run_simulation():
     print("Starting background crowd simulator polling...")
