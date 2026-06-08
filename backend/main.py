@@ -1,7 +1,7 @@
 import os
 import time
 import random
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Any
 
 from fastapi import FastAPI, HTTPException
@@ -29,7 +29,7 @@ pipeline_logs: List[Dict[str, Any]] = []
 active_promotions: List[Dict[str, Any]] = []
 
 def add_log(message: str):
-    timestamp = datetime.now().isoformat()
+    timestamp = datetime.now(timezone.utc).isoformat()
     pipeline_logs.append({"timestamp": timestamp, "message": message})
     if len(pipeline_logs) > 200:
         pipeline_logs.pop(0)
@@ -113,7 +113,7 @@ async def trigger_surge(request: SurgeRequest):
                     "discount_code": promo.discount_code,
                     "message": promo.message,
                     "duration_minutes": promo.duration_minutes,
-                    "timestamp": datetime.now().isoformat()
+                    "timestamp": datetime.now(timezone.utc).isoformat()
                 }
                 active_promotions.append(promo_entry)
                 triggered_promotions.append(promo_entry)
