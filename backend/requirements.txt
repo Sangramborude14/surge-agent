@@ -5,3 +5,5 @@ python-dotenv==1.0.1
 pydantic>=2.6.4
 google-antigravity==2.0.0
 certifi
+cryptography
+
