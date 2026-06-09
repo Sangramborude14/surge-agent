@@ -17,6 +17,7 @@ from tenancy import set_current_tenant_id, get_current_tenant_id, set_global_def
 from edge_compute import global_edge_buffer, get_zone_visitor_count, run_historical_rollup
 from campaign_service import find_similar_campaigns, generate_creative_offer, create_and_save_campaign, track_campaign_impression, track_campaign_redemption
 from reservation import allocate_surge_stock, claim_coupon
+from nexus_governor import predictive_inventory_shift, create_coop_deal, sentiment_vector_search
 
 app = FastAPI(title="Tourist Surge Retail Agent Backend 2.0")
 
@@ -213,6 +214,52 @@ async def switch_tenant(payload: SwitchTenantPayload):
         set_current_tenant_id(payload.tenantId)
         add_log(f"Global tenant context switched successfully to '{payload.tenantId}'.")
         return {"status": "success", "currentTenantId": get_current_tenant_id()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==========================================
+# 5. NORSG-2.0 GOVERNOR CORE WORKFLOW ENDPOINTS
+# ==========================================
+class ShiftInventoryPayload(BaseModel):
+    zoneId: str = Field(..., description="Target zone to evaluate demand")
+    itemId: str = Field(..., description="The surplus product ID to shift")
+
+class CoopDealPayload(BaseModel):
+    zoneId: str = Field(..., description="Active zone for campaign trigger")
+    buyerProfile: str = Field(..., description="Target buyer profile (e.g., families, fans)")
+
+class SentimentSearchPayload(BaseModel):
+    queryText: str = Field(..., description="Raw sentiment text from the customer")
+    location: List[float] = Field(..., description="Customer current location coordinates: [longitude, latitude]")
+
+@app.post("/api/nexus/shift-inventory")
+async def api_shift_inventory(payload: ShiftInventoryPayload):
+    try:
+        result = predictive_inventory_shift(payload.zoneId, payload.itemId)
+        return result
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/nexus/coop-deal")
+async def api_create_coop_deal(payload: CoopDealPayload):
+    try:
+        result = create_coop_deal(payload.zoneId, payload.buyerProfile)
+        return result
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/nexus/sentiment-search")
+async def api_sentiment_search(payload: SentimentSearchPayload):
+    try:
+        result = sentiment_vector_search(payload.queryText, payload.location)
+        return result
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -69,6 +69,40 @@ def init_db():
     # 6. past_campaigns Index for local fallback query searches
     db.past_campaigns.create_index([("tenantId", 1)])
     
+    # 7. time_series_foot_traffic - MongoDB Time Series Collection (New)
+    if "time_series_foot_traffic" not in col_names:
+        try:
+            raw_db.create_collection(
+                "time_series_foot_traffic",
+                timeseries={
+                    "timeField": "timestamp",
+                    "metaField": "metadata",
+                    "granularity": "seconds"
+                }
+            )
+            print("Successfully created 'time_series_foot_traffic' as a Time Series collection.")
+        except Exception as e:
+            print(f"Error creating time_series_foot_traffic collection: {e}")
+            
+    # Configure 30-day TTL index on foot traffic Time Series
+    db.time_series_foot_traffic.create_index(
+        [("timestamp", 1)],
+        expireAfterSeconds=2592000,
+        partialFilterExpression={"metadata": {"$exists": True}}
+    )
+    
+    # 8. tenant_inventory Geospatial Index (New)
+    db.tenant_inventory.create_index([("location", "2dsphere")])
+    db.tenant_inventory.create_index([("tenantId", 1)])
+    
+    # 9. co_opetition_campaigns Lookup Indexes (New)
+    db.co_opetition_campaigns.create_index([("campaignId", 1)], unique=True)
+    db.co_opetition_campaigns.create_index([("triggerZoneId", 1)])
+    
+    # 10. user_profiles_and_sentiment Indexes (New)
+    db.user_profiles_and_sentiment.create_index([("userId", 1)], unique=True)
+    db.user_profiles_and_sentiment.create_index([("location", "2dsphere")])
+    
     print("Database initialized successfully with Time Series, 2dsphere indexes, and rollup constraints.")
 
 
