@@ -23,8 +23,30 @@ def seed_data():
     
     print("Cleared all database collections (NORSG-2.0 & legacy baseline).")
 
-    # 3. Seed GeoJSON Zones (MetLife Sector 3 Plaza)
-    # Location coordinates around MetLife Plaza e.g., longitude: -74.0060, latitude: 40.7128
+    # 3. Seed GeoJSON Zones
+    # Zone A (West Wing) Polygon
+    zone_a_poly = {
+        "type": "Polygon",
+        "coordinates": [[
+            [121.498, 31.238],
+            [121.505, 31.238],
+            [121.505, 31.243],
+            [121.498, 31.243],
+            [121.498, 31.238]
+        ]]
+    }
+    # Zone B (East Wing) Polygon
+    zone_b_poly = {
+        "type": "Polygon",
+        "coordinates": [[
+            [121.512, 31.243],
+            [121.518, 31.243],
+            [121.518, 31.248],
+            [121.512, 31.248],
+            [121.512, 31.243]
+        ]]
+    }
+    # MetLife Stadium Sector 3 Plaza Polygon
     sector_3_plaza_poly = {
         "type": "Polygon",
         "coordinates": [[
@@ -38,6 +60,18 @@ def seed_data():
     
     zones = [
         {
+            "zoneId": "zone_a",
+            "name": "Zone A // West Wing",
+            "geometry": zone_a_poly,
+            "tenantId": "default_tenant"
+        },
+        {
+            "zoneId": "zone_b",
+            "name": "Zone B // East Wing",
+            "geometry": zone_b_poly,
+            "tenantId": "default_tenant"
+        },
+        {
             "zoneId": "zone_sector_3_plaza",
             "name": "MetLife Stadium Sector 3 Plaza",
             "geometry": sector_3_plaza_poly,
@@ -46,6 +80,72 @@ def seed_data():
     ]
     db.zones.insert_many(zones)
     print("Successfully seeded GeoJSON zones.")
+
+    # 3.5 Seed storefronts (for legacy dashboard promotions signage)
+    stores = [
+        {
+            "name": "World Cup Athletics",
+            "location": {
+                "type": "Point",
+                "coordinates": [121.501, 31.240]
+            },
+            "item": "World Cup Jersey",
+            "current_stock": 150,
+            "target_stock": 20,
+            "surgeAllocatedStock": 0,
+            "claimedBy": [],
+            "margin": 0.45,
+            "wholesalePrice": 45.0,
+            "tenantId": "default_tenant"
+        },
+        {
+            "name": "Fan Zone Goods",
+            "location": {
+                "type": "Point",
+                "coordinates": [121.502, 31.241]
+            },
+            "item": "Mascot Cap",
+            "current_stock": 80,
+            "target_stock": 10,
+            "surgeAllocatedStock": 0,
+            "claimedBy": [],
+            "margin": 0.50,
+            "wholesalePrice": 12.0,
+            "tenantId": "default_tenant"
+        },
+        {
+            "name": "Champions Souvenirs",
+            "location": {
+                "type": "Point",
+                "coordinates": [121.515, 31.245]
+            },
+            "item": "Tournament Soccer Ball",
+            "current_stock": 120,
+            "target_stock": 30,
+            "surgeAllocatedStock": 0,
+            "claimedBy": [],
+            "margin": 0.40,
+            "wholesalePrice": 18.0,
+            "tenantId": "default_tenant"
+        },
+        {
+            "name": "Stadium Snacks & Gear",
+            "location": {
+                "type": "Point",
+                "coordinates": [121.516, 31.246]
+            },
+            "item": "Reusable Water Bottle",
+            "current_stock": 60,
+            "target_stock": 15,
+            "surgeAllocatedStock": 0,
+            "claimedBy": [],
+            "margin": 0.60,
+            "wholesalePrice": 4.50,
+            "tenantId": "default_tenant"
+        }
+    ]
+    db.stores.insert_many(stores)
+    print("Successfully seeded storefronts.")
 
     # 4. Seed time_series_foot_traffic (density spike prior to stadium exits)
     now = datetime.now(timezone.utc)
