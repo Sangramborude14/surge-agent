@@ -14,6 +14,9 @@ interface Store {
   current_stock: number;
   target_stock: number;
   wholesalePrice?: number;
+  category?: string;
+  brand?: string;
+  sales?: number;
 }
 
 interface Promotion {
@@ -44,37 +47,144 @@ const parseTimestamp = (ts: string) => {
 
 // Mock data for offline mode
 const INITIAL_MOCK_STORES: Store[] = [
+  // WORLD CUP ATHLETICS (Zone A)
   {
     name: "World Cup Athletics",
     location: { type: "Point", coordinates: [121.501, 31.240] },
     item: "World Cup Jersey",
     current_stock: 150,
     target_stock: 20,
-    wholesalePrice: 45.0
+    wholesalePrice: 45.0,
+    category: "Apparel",
+    brand: "Adidas",
+    sales: 120
   },
+  {
+    name: "World Cup Athletics",
+    location: { type: "Point", coordinates: [121.501, 31.240] },
+    item: "Retro Germany Jersey",
+    current_stock: 110,
+    target_stock: 15,
+    wholesalePrice: 40.0,
+    category: "Apparel",
+    brand: "Adidas",
+    sales: 85
+  },
+  {
+    name: "World Cup Athletics",
+    location: { type: "Point", coordinates: [121.501, 31.240] },
+    item: "Running Sneakers",
+    current_stock: 90,
+    target_stock: 20,
+    wholesalePrice: 60.0,
+    category: "Apparel",
+    brand: "Nike",
+    sales: 40
+  },
+
+  // FAN ZONE GOODS (Zone A)
   {
     name: "Fan Zone Goods",
     location: { type: "Point", coordinates: [121.502, 31.241] },
     item: "Mascot Cap",
     current_stock: 80,
     target_stock: 10,
-    wholesalePrice: 12.0
+    wholesalePrice: 12.0,
+    category: "Accessories",
+    brand: "Puma",
+    sales: 45
   },
+  {
+    name: "Fan Zone Goods",
+    location: { type: "Point", coordinates: [121.502, 31.241] },
+    item: "Mascot Plush Toy",
+    current_stock: 75,
+    target_stock: 12,
+    wholesalePrice: 10.0,
+    category: "Accessories",
+    brand: "Puma",
+    sales: 15
+  },
+  {
+    name: "Fan Zone Goods",
+    location: { type: "Point", coordinates: [121.502, 31.241] },
+    item: "Team Scarf",
+    current_stock: 120,
+    target_stock: 25,
+    wholesalePrice: 15.0,
+    category: "Accessories",
+    brand: "Nike",
+    sales: 95
+  },
+
+  // CHAMPIONS SOUVENIRS (Zone B)
   {
     name: "Champions Souvenirs",
     location: { type: "Point", coordinates: [121.515, 31.245] },
     item: "Tournament Soccer Ball",
     current_stock: 120,
     target_stock: 30,
-    wholesalePrice: 18.0
+    wholesalePrice: 18.0,
+    category: "Equipment",
+    brand: "Adidas",
+    sales: 70
   },
+  {
+    name: "Champions Souvenirs",
+    location: { type: "Point", coordinates: [121.515, 31.245] },
+    item: "Futsal Ball",
+    current_stock: 80,
+    target_stock: 15,
+    wholesalePrice: 22.0,
+    category: "Equipment",
+    brand: "Adidas",
+    sales: 30
+  },
+  {
+    name: "Champions Souvenirs",
+    location: { type: "Point", coordinates: [121.515, 31.245] },
+    item: "Goalkeeper Gloves",
+    current_stock: 65,
+    target_stock: 10,
+    wholesalePrice: 25.0,
+    category: "Equipment",
+    brand: "Puma",
+    sales: 12
+  },
+
+  // STADIUM SNACKS & GEAR (Zone B)
   {
     name: "Stadium Snacks & Gear",
     location: { type: "Point", coordinates: [121.516, 31.246] },
     item: "Reusable Water Bottle",
     current_stock: 60,
     target_stock: 15,
-    wholesalePrice: 4.5
+    wholesalePrice: 4.5,
+    category: "Refreshments",
+    brand: "Nike",
+    sales: 35
+  },
+  {
+    name: "Stadium Snacks & Gear",
+    location: { type: "Point", coordinates: [121.516, 31.246] },
+    item: "Isotonic Energy Drink",
+    current_stock: 200,
+    target_stock: 40,
+    wholesalePrice: 3.0,
+    category: "Refreshments",
+    brand: "Coca-Cola",
+    sales: 250
+  },
+  {
+    name: "Stadium Snacks & Gear",
+    location: { type: "Point", coordinates: [121.516, 31.246] },
+    item: "Organic Protein Yogurt",
+    current_stock: 50,
+    target_stock: 10,
+    wholesalePrice: 5.0,
+    category: "Refreshments",
+    brand: "Under Armour",
+    sales: 8
   }
 ];
 
@@ -347,12 +457,38 @@ export default function Home() {
         }
       }
     }
+
+    let leastSalesBoost = 0;
+    const currentStoresList = stores.length > 0 ? stores : INITIAL_MOCK_STORES;
+    const currentStoreItem = currentStoresList.find(s => s.name === storeName && s.item === itemName);
+    if (currentStoreItem && query.trim().length >= 2) {
+      const q = query.trim().toLowerCase();
+      const isSearchMatch = 
+        currentStoreItem.item.toLowerCase().includes(q) ||
+        currentStoreItem.name.toLowerCase().includes(q) ||
+        (currentStoreItem.category && currentStoreItem.category.toLowerCase().includes(q)) ||
+        (currentStoreItem.brand && currentStoreItem.brand.toLowerCase().includes(q));
+      
+      if (isSearchMatch) {
+        const siblings = currentStoresList.filter(s => 
+          (currentStoreItem.category && s.category === currentStoreItem.category) ||
+          (currentStoreItem.brand && s.brand === currentStoreItem.brand)
+        );
+        if (siblings.length > 0) {
+          const minSales = Math.min(...siblings.map(s => s.sales ?? 0));
+          if ((currentStoreItem.sales ?? 0) === minSales) {
+            leastSalesBoost = 15;
+          }
+        }
+      }
+    }
     
     return {
       base: baseDiscount,
       keywordBoost,
       sentimentBoost,
-      total: Math.min(90, baseDiscount + keywordBoost + sentimentBoost)
+      leastSalesBoost,
+      total: Math.min(90, baseDiscount + keywordBoost + sentimentBoost + leastSalesBoost)
     };
   };
 
@@ -361,7 +497,9 @@ export default function Home() {
     const q = query.toLowerCase();
     const itemName = store.item || "";
     const name = store.name || "";
-    return itemName.toLowerCase().includes(q) || name.toLowerCase().includes(q);
+    const category = store.category || "";
+    const brand = store.brand || "";
+    return itemName.toLowerCase().includes(q) || name.toLowerCase().includes(q) || category.toLowerCase().includes(q) || brand.toLowerCase().includes(q);
   };
 
   const handleSearchSentiment = async (zone: "A" | "B") => {
@@ -1046,6 +1184,12 @@ export default function Home() {
                 {(stores.length > 0 ? stores : INITIAL_MOCK_STORES)
                   .filter(s => s.name === "World Cup Athletics" || s.name === "Fan Zone Goods")
                   .filter(s => filterStoreByQuery(s, searchZoneA))
+                  .sort((a, b) => {
+                    if (searchZoneA.trim()) {
+                      return (a.sales ?? 0) - (b.sales ?? 0);
+                    }
+                    return 0;
+                  })
                   .map(store => {
                     const discounts = getCalculatedDiscount(store.name, store.item, "A");
                     const originalPrice = (store.wholesalePrice ?? 20) * 1.5;
@@ -1054,12 +1198,25 @@ export default function Home() {
                       : originalPrice;
                     const maxStock = store.name.includes("World Cup") ? 150 : store.name.includes("Champions") ? 120 : store.name.includes("Fan") ? 80 : 60;
                     const isCritical = store.current_stock <= store.target_stock;
+                    
+                    const currentStoresList = stores.length > 0 ? stores : INITIAL_MOCK_STORES;
+                    const siblings = currentStoresList.filter(s => 
+                      (store.category && s.category === store.category) ||
+                      (store.brand && s.brand === store.brand)
+                    );
+                    const isLeastSales = searchZoneA.trim() !== "" && siblings.length > 0 && 
+                      (store.sales ?? 0) === Math.min(...siblings.map(s => s.sales ?? 0));
 
                     return (
                       <div 
-                        key={store.name} 
+                        key={store.name + "-" + store.item} 
                         className="border border-zinc-900 bg-zinc-950/40 hover:border-zinc-850 p-4 rounded-md transition-all flex flex-col justify-between relative overflow-hidden"
                       >
+                        {isLeastSales && (
+                          <div className="absolute top-2 left-2 bg-amber-500/90 text-zinc-950 text-[8px] font-bold px-1.5 py-0.5 rounded shadow-sm z-10 font-mono uppercase tracking-wider">
+                            📉 Least Sales Focus
+                          </div>
+                        )}
                         {discounts.total > 0 && (
                           <div className="absolute top-2 right-2 bg-rose-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm z-10">
                             {discounts.total}% OFF
@@ -1067,7 +1224,9 @@ export default function Home() {
                         )}
                         
                         <div className="space-y-1">
-                          <span className="text-[9px] uppercase tracking-wider text-zinc-550 font-mono">{store.name}</span>
+                          <span className="text-[9px] uppercase tracking-wider text-zinc-555 font-mono">
+                            {store.name} {store.brand && `// ${store.brand.toUpperCase()}`}
+                          </span>
                           <h4 className="text-xs font-bold text-zinc-200">{store.item}</h4>
                         </div>
 
@@ -1076,13 +1235,13 @@ export default function Home() {
                             ${finalPrice.toFixed(2)}
                           </span>
                           {discounts.total > 0 && (
-                            <span className="text-[10px] text-zinc-600 line-through">
+                            <span className="text-[10px] text-zinc-655 line-through">
                               ${originalPrice.toFixed(2)}
                             </span>
                           )}
                         </div>
 
-                        {(discounts.keywordBoost > 0 || discounts.sentimentBoost > 0) && (
+                        {(discounts.keywordBoost > 0 || discounts.sentimentBoost > 0 || discounts.leastSalesBoost > 0) && (
                           <div className="mt-2 flex flex-col gap-0.5 text-[8px] font-mono">
                             {discounts.keywordBoost > 0 && (
                               <span className="text-emerald-400">
@@ -1092,6 +1251,11 @@ export default function Home() {
                             {discounts.sentimentBoost > 0 && (
                               <span className="text-purple-400">
                                 +15% Sentiment Target Boost
+                              </span>
+                            )}
+                            {discounts.leastSalesBoost > 0 && (
+                              <span className="text-amber-400">
+                                +15% Least Sales Boost
                               </span>
                             )}
                           </div>
@@ -1185,6 +1349,12 @@ export default function Home() {
                 {(stores.length > 0 ? stores : INITIAL_MOCK_STORES)
                   .filter(s => s.name === "Champions Souvenirs" || s.name === "Stadium Snacks & Gear")
                   .filter(s => filterStoreByQuery(s, searchZoneB))
+                  .sort((a, b) => {
+                    if (searchZoneB.trim()) {
+                      return (a.sales ?? 0) - (b.sales ?? 0);
+                    }
+                    return 0;
+                  })
                   .map(store => {
                     const discounts = getCalculatedDiscount(store.name, store.item, "B");
                     const originalPrice = (store.wholesalePrice ?? 20) * 1.5;
@@ -1193,12 +1363,25 @@ export default function Home() {
                       : originalPrice;
                     const maxStock = store.name.includes("World Cup") ? 150 : store.name.includes("Champions") ? 120 : store.name.includes("Fan") ? 80 : 60;
                     const isCritical = store.current_stock <= store.target_stock;
+                    
+                    const currentStoresList = stores.length > 0 ? stores : INITIAL_MOCK_STORES;
+                    const siblings = currentStoresList.filter(s => 
+                      (store.category && s.category === store.category) ||
+                      (store.brand && s.brand === store.brand)
+                    );
+                    const isLeastSales = searchZoneB.trim() !== "" && siblings.length > 0 && 
+                      (store.sales ?? 0) === Math.min(...siblings.map(s => s.sales ?? 0));
 
                     return (
                       <div 
-                        key={store.name} 
+                        key={store.name + "-" + store.item} 
                         className="border border-zinc-900 bg-zinc-950/40 hover:border-zinc-850 p-4 rounded-md transition-all flex flex-col justify-between relative overflow-hidden"
                       >
+                        {isLeastSales && (
+                          <div className="absolute top-2 left-2 bg-amber-500/90 text-zinc-950 text-[8px] font-bold px-1.5 py-0.5 rounded shadow-sm z-10 font-mono uppercase tracking-wider">
+                            📉 Least Sales Focus
+                          </div>
+                        )}
                         {discounts.total > 0 && (
                           <div className="absolute top-2 right-2 bg-rose-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm z-10">
                             {discounts.total}% OFF
@@ -1206,7 +1389,9 @@ export default function Home() {
                         )}
                         
                         <div className="space-y-1">
-                          <span className="text-[9px] uppercase tracking-wider text-zinc-550 font-mono">{store.name}</span>
+                          <span className="text-[9px] uppercase tracking-wider text-zinc-555 font-mono">
+                            {store.name} {store.brand && `// ${store.brand.toUpperCase()}`}
+                          </span>
                           <h4 className="text-xs font-bold text-zinc-200">{store.item}</h4>
                         </div>
 
@@ -1215,13 +1400,13 @@ export default function Home() {
                             ${finalPrice.toFixed(2)}
                           </span>
                           {discounts.total > 0 && (
-                            <span className="text-[10px] text-zinc-600 line-through">
+                            <span className="text-[10px] text-zinc-650 line-through">
                               ${originalPrice.toFixed(2)}
                             </span>
                           )}
                         </div>
 
-                        {(discounts.keywordBoost > 0 || discounts.sentimentBoost > 0) && (
+                        {(discounts.keywordBoost > 0 || discounts.sentimentBoost > 0 || discounts.leastSalesBoost > 0) && (
                           <div className="mt-2 flex flex-col gap-0.5 text-[8px] font-mono">
                             {discounts.keywordBoost > 0 && (
                               <span className="text-emerald-400">
@@ -1231,6 +1416,11 @@ export default function Home() {
                             {discounts.sentimentBoost > 0 && (
                               <span className="text-purple-400">
                                 +15% Sentiment Target Boost
+                              </span>
+                            )}
+                            {discounts.leastSalesBoost > 0 && (
+                              <span className="text-amber-400">
+                                +15% Least Sales Boost
                               </span>
                             )}
                           </div>

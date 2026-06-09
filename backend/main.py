@@ -272,9 +272,9 @@ class PurchasePayload(BaseModel):
 @app.post("/api/purchase")
 async def purchase_item(payload: PurchasePayload):
     try:
-        store = db.stores.find_one({"name": payload.storeName})
+        store = db.stores.find_one({"name": payload.storeName, "item": payload.itemName})
         if not store:
-            raise HTTPException(status_code=404, detail="Store not found")
+            raise HTTPException(status_code=404, detail="Store/item not found")
         
         curr_stock = store.get("current_stock", 0)
         target_stock = store.get("target_stock", 0)
@@ -284,10 +284,13 @@ async def purchase_item(payload: PurchasePayload):
             
         new_stock = curr_stock - payload.quantity
         
-        # Update database
+        # Update database: decrement stock and increment sales
         db.stores.update_one(
-            {"name": payload.storeName},
-            {"$set": {"current_stock": new_stock}}
+            {"name": payload.storeName, "item": payload.itemName},
+            {
+                "$set": {"current_stock": new_stock},
+                "$inc": {"sales": payload.quantity}
+            }
         )
         add_log(f"Purchase: {payload.quantity}x '{payload.itemName}' from '{payload.storeName}'. Stock: {curr_stock} -> {new_stock}")
         
@@ -296,10 +299,10 @@ async def purchase_item(payload: PurchasePayload):
         
         # We loop through a copy of active_promotions to safely modify it
         for promo in list(active_promotions):
-            if promo["store_name"].lower() == payload.storeName.lower():
+            if promo["store_name"].lower() == payload.storeName.lower() and promo["item"].lower() == payload.itemName.lower():
                 if surplus <= 0:
                     active_promotions.remove(promo)
-                    add_log(f"Promotion expired for '{payload.storeName}' because stock reached target threshold.")
+                    add_log(f"Promotion expired for '{payload.storeName}' - '{payload.itemName}' because stock reached target threshold.")
                 else:
                     # Scale discount based on surplus
                     if surplus >= 100:
@@ -315,8 +318,57 @@ async def purchase_item(payload: PurchasePayload):
                         
                     promo["discount_code"] = f"SURGE{discount}_{payload.storeName.replace(' ', '')[:5].upper()}"
                     promo["message"] = f"Tourist Surge Alert! Get {discount}% off on '{payload.itemName}' at {payload.storeName}! Hurry, offer valid for a limited time."
-                    add_log(f"Discount readjusted for '{payload.storeName}': {discount}% off (Surplus: {surplus})")
+                    add_log(f"Discount readjusted for '{payload.storeName}' - '{payload.itemName}': {discount}% off (Surplus: {surplus})")
                 break
+                
+        # Trigger dynamic promotion on category/brand sibling with least sales
+        category = store.get("category")
+        brand = store.get("brand")
+        
+        low_sales_item = None
+        or_filters = []
+        if category:
+            or_filters.append({"category": category})
+        if brand:
+            or_filters.append({"brand": brand})
+            
+        if or_filters:
+            siblings = list(db.stores.find({"$or": or_filters}))
+            other_siblings = [s for s in siblings if not (s["name"] == payload.storeName and s["item"] == payload.itemName)]
+            candidates = other_siblings if other_siblings else siblings
+            if candidates:
+                candidates.sort(key=lambda x: x.get("sales", 0))
+                low_sales_item = candidates[0]
+                
+        if low_sales_item:
+            low_store_name = low_sales_item["name"]
+            low_item_name = low_sales_item["item"]
+            low_sales_count = low_sales_item.get("sales", 0)
+            
+            # Check if this low sales item already has an active promotion
+            existing_low_promo = None
+            for promo in active_promotions:
+                if promo["store_name"].lower() == low_store_name.lower() and promo["item"].lower() == low_item_name.lower():
+                    existing_low_promo = promo
+                    break
+                    
+            discount = 40
+            if existing_low_promo:
+                existing_low_promo["discount_code"] = f"BOOST{discount}_{low_store_name.replace(' ', '')[:5].upper()}"
+                existing_low_promo["message"] = f"🔥 LOW SALES FOCUS! Enjoy {discount}% OFF '{low_item_name}' at {low_store_name}! Limited sales priority deal."
+                add_log(f"Dynamic promotion boosted for low-sales sibling '{low_store_name}' - '{low_item_name}' (Sales: {low_sales_count})")
+            else:
+                new_promo = {
+                    "id": f"low_sales_{random.randint(1000, 9999)}",
+                    "store_name": low_store_name,
+                    "item": low_item_name,
+                    "discount_code": f"BOOST{discount}_{low_store_name.replace(' ', '')[:5].upper()}",
+                    "message": f"🔥 LOW SALES PRIORITY! Take {discount}% OFF '{low_item_name}' at {low_store_name}! Grab this category deal.",
+                    "duration_minutes": 15,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+                active_promotions.append(new_promo)
+                add_log(f"Launched dynamic low-sales promotion for sibling '{low_store_name}' - '{low_item_name}' (Sales: {low_sales_count})")
                 
         # Return updated stores and active promotions
         updated_stores = list(db.stores.find({}))

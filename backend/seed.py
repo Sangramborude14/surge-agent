@@ -83,6 +83,7 @@ def seed_data():
 
     # 3.5 Seed storefronts (for legacy dashboard promotions signage)
     stores = [
+        # WORLD CUP ATHLETICS (Zone A)
         {
             "name": "World Cup Athletics",
             "location": {
@@ -96,8 +97,49 @@ def seed_data():
             "claimedBy": [],
             "margin": 0.45,
             "wholesalePrice": 45.0,
+            "category": "Apparel",
+            "brand": "Adidas",
+            "sales": 120,
             "tenantId": "default_tenant"
         },
+        {
+            "name": "World Cup Athletics",
+            "location": {
+                "type": "Point",
+                "coordinates": [121.501, 31.240]
+            },
+            "item": "Retro Germany Jersey",
+            "current_stock": 110,
+            "target_stock": 15,
+            "surgeAllocatedStock": 0,
+            "claimedBy": [],
+            "margin": 0.40,
+            "wholesalePrice": 40.0,
+            "category": "Apparel",
+            "brand": "Adidas",
+            "sales": 85,
+            "tenantId": "default_tenant"
+        },
+        {
+            "name": "World Cup Athletics",
+            "location": {
+                "type": "Point",
+                "coordinates": [121.501, 31.240]
+            },
+            "item": "Running Sneakers",
+            "current_stock": 90,
+            "target_stock": 20,
+            "surgeAllocatedStock": 0,
+            "claimedBy": [],
+            "margin": 0.50,
+            "wholesalePrice": 60.0,
+            "category": "Apparel",
+            "brand": "Nike",
+            "sales": 40,
+            "tenantId": "default_tenant"
+        },
+
+        # FAN ZONE GOODS (Zone A)
         {
             "name": "Fan Zone Goods",
             "location": {
@@ -111,8 +153,49 @@ def seed_data():
             "claimedBy": [],
             "margin": 0.50,
             "wholesalePrice": 12.0,
+            "category": "Accessories",
+            "brand": "Puma",
+            "sales": 45,
             "tenantId": "default_tenant"
         },
+        {
+            "name": "Fan Zone Goods",
+            "location": {
+                "type": "Point",
+                "coordinates": [121.502, 31.241]
+            },
+            "item": "Mascot Plush Toy",
+            "current_stock": 75,
+            "target_stock": 12,
+            "surgeAllocatedStock": 0,
+            "claimedBy": [],
+            "margin": 0.55,
+            "wholesalePrice": 10.0,
+            "category": "Accessories",
+            "brand": "Puma",
+            "sales": 15,
+            "tenantId": "default_tenant"
+        },
+        {
+            "name": "Fan Zone Goods",
+            "location": {
+                "type": "Point",
+                "coordinates": [121.502, 31.241]
+            },
+            "item": "Team Scarf",
+            "current_stock": 120,
+            "target_stock": 25,
+            "surgeAllocatedStock": 0,
+            "claimedBy": [],
+            "margin": 0.45,
+            "wholesalePrice": 15.0,
+            "category": "Accessories",
+            "brand": "Nike",
+            "sales": 95,
+            "tenantId": "default_tenant"
+        },
+
+        # CHAMPIONS SOUVENIRS (Zone B)
         {
             "name": "Champions Souvenirs",
             "location": {
@@ -126,8 +209,49 @@ def seed_data():
             "claimedBy": [],
             "margin": 0.40,
             "wholesalePrice": 18.0,
+            "category": "Equipment",
+            "brand": "Adidas",
+            "sales": 70,
             "tenantId": "default_tenant"
         },
+        {
+            "name": "Champions Souvenirs",
+            "location": {
+                "type": "Point",
+                "coordinates": [121.515, 31.245]
+            },
+            "item": "Futsal Ball",
+            "current_stock": 80,
+            "target_stock": 15,
+            "surgeAllocatedStock": 0,
+            "claimedBy": [],
+            "margin": 0.45,
+            "wholesalePrice": 22.0,
+            "category": "Equipment",
+            "brand": "Adidas",
+            "sales": 30,
+            "tenantId": "default_tenant"
+        },
+        {
+            "name": "Champions Souvenirs",
+            "location": {
+                "type": "Point",
+                "coordinates": [121.515, 31.245]
+            },
+            "item": "Goalkeeper Gloves",
+            "current_stock": 65,
+            "target_stock": 10,
+            "surgeAllocatedStock": 0,
+            "claimedBy": [],
+            "margin": 0.50,
+            "wholesalePrice": 25.0,
+            "category": "Equipment",
+            "brand": "Puma",
+            "sales": 12,
+            "tenantId": "default_tenant"
+        },
+
+        # STADIUM SNACKS & GEAR (Zone B)
         {
             "name": "Stadium Snacks & Gear",
             "location": {
@@ -141,6 +265,45 @@ def seed_data():
             "claimedBy": [],
             "margin": 0.60,
             "wholesalePrice": 4.50,
+            "category": "Refreshments",
+            "brand": "Nike",
+            "sales": 35,
+            "tenantId": "default_tenant"
+        },
+        {
+            "name": "Stadium Snacks & Gear",
+            "location": {
+                "type": "Point",
+                "coordinates": [121.516, 31.246]
+            },
+            "item": "Isotonic Energy Drink",
+            "current_stock": 200,
+            "target_stock": 40,
+            "surgeAllocatedStock": 0,
+            "claimedBy": [],
+            "margin": 0.70,
+            "wholesalePrice": 3.00,
+            "category": "Refreshments",
+            "brand": "Coca-Cola",
+            "sales": 250,
+            "tenantId": "default_tenant"
+        },
+        {
+            "name": "Stadium Snacks & Gear",
+            "location": {
+                "type": "Point",
+                "coordinates": [121.516, 31.246]
+            },
+            "item": "Organic Protein Yogurt",
+            "current_stock": 50,
+            "target_stock": 10,
+            "surgeAllocatedStock": 0,
+            "claimedBy": [],
+            "margin": 0.65,
+            "wholesalePrice": 5.00,
+            "category": "Refreshments",
+            "brand": "Under Armour",
+            "sales": 8,
             "tenantId": "default_tenant"
         }
     ]

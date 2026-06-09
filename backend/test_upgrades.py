@@ -309,15 +309,30 @@ class TestAntigravityUpgrades(unittest.TestCase):
         import asyncio
         from main import purchase_item, PurchasePayload, active_promotions
         
-        # A. Setup initial store and promotion
+        # A. Setup initial stores with categories, brands, and sales
         set_current_tenant_id("default_tenant")
-        db.stores.insert_one({
-            "name": "World Cup Athletics",
-            "item": "World Cup Jersey",
-            "current_stock": 100,
-            "target_stock": 20,
-            "wholesalePrice": 45.0
-        })
+        db.stores.insert_many([
+            {
+                "name": "World Cup Athletics",
+                "item": "World Cup Jersey",
+                "current_stock": 100,
+                "target_stock": 20,
+                "wholesalePrice": 45.0,
+                "category": "Apparel",
+                "brand": "Adidas",
+                "sales": 120
+            },
+            {
+                "name": "World Cup Athletics",
+                "item": "Retro Germany Jersey",
+                "current_stock": 110,
+                "target_stock": 15,
+                "wholesalePrice": 40.0,
+                "category": "Apparel",
+                "brand": "Adidas",
+                "sales": 85
+            }
+        ])
         
         active_promotions.clear()
         active_promotions.append({
@@ -330,7 +345,7 @@ class TestAntigravityUpgrades(unittest.TestCase):
             "timestamp": datetime.now(timezone.utc).isoformat()
         })
         
-        # B. Make purchase that decrements stock but keeps surplus high
+        # B. Make purchase that decrements stock, increments sales, and triggers promotion for lowest-sales sibling
         result = asyncio.run(purchase_item(PurchasePayload(
             storeName="World Cup Athletics",
             itemName="World Cup Jersey",
@@ -339,12 +354,22 @@ class TestAntigravityUpgrades(unittest.TestCase):
         
         self.assertEqual(result["status"], "success")
         
-        # Stock: 100 -> 90. Surplus: 90 - 20 = 70. Discount should scale to 40%
-        store = db.stores.find_one({"name": "World Cup Athletics"})
+        # Stock: 100 -> 90. Sales: 120 -> 130
+        store = db.stores.find_one({"name": "World Cup Athletics", "item": "World Cup Jersey"})
         self.assertEqual(store["current_stock"], 90)
+        self.assertEqual(store["sales"], 130)
         
-        self.assertEqual(len(result["promotions"]), 1)
-        self.assertIn("SURGE40", result["promotions"][0]["discount_code"])
+        # Check that active promotions now contains two promotions:
+        # 1. The scaled promotion for "World Cup Jersey" (SURGE40)
+        # 2. The new low-sales boost promotion for "Retro Germany Jersey" (BOOST40)
+        promos = result["promotions"]
+        self.assertEqual(len(promos), 2)
+        
+        world_promo = next(p for p in promos if p["item"] == "World Cup Jersey")
+        self.assertIn("SURGE40", world_promo["discount_code"])
+        
+        germany_promo = next(p for p in promos if p["item"] == "Retro Germany Jersey")
+        self.assertIn("BOOST40", germany_promo["discount_code"])
         
         # C. Make purchase that triggers promotion expiration (stock <= target_stock)
         result_exp = asyncio.run(purchase_item(PurchasePayload(
@@ -353,12 +378,15 @@ class TestAntigravityUpgrades(unittest.TestCase):
             quantity=70 # Stock goes to 20, which is <= target_stock (20)
         )))
         
-        self.assertEqual(len(result_exp["promotions"]), 0) # Promo expired and cleared
+        # World Cup Jersey promo should be expired and removed, leaving only Germany promo
+        self.assertEqual(len(result_exp["promotions"]), 1)
+        self.assertNotIn("World Cup Jersey", [p["item"] for p in result_exp["promotions"]])
+        self.assertEqual(result_exp["promotions"][0]["item"], "Retro Germany Jersey")
         
-        store = db.stores.find_one({"name": "World Cup Athletics"})
+        store = db.stores.find_one({"name": "World Cup Athletics", "item": "World Cup Jersey"})
         self.assertEqual(store["current_stock"], 20)
         
-        print("[SUCCESS] Dynamic purchase dynamic stock scaling and auto-expiration verified.")
+        print("[SUCCESS] Dynamic purchase dynamic stock scaling, sales tracking, least-sales promotion triggering, and auto-expiration verified.")
 
 if __name__ == "__main__":
     unittest.main()
