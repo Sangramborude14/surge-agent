@@ -264,6 +264,78 @@ async def api_sentiment_search(payload: SentimentSearchPayload):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class PurchasePayload(BaseModel):
+    storeName: str = Field(..., description="Store name where item is purchased")
+    itemName: str = Field(..., description="Item being purchased")
+    quantity: int = Field(1, description="Quantity to purchase")
+
+@app.post("/api/purchase")
+async def purchase_item(payload: PurchasePayload):
+    try:
+        store = db.stores.find_one({"name": payload.storeName})
+        if not store:
+            raise HTTPException(status_code=404, detail="Store not found")
+        
+        curr_stock = store.get("current_stock", 0)
+        target_stock = store.get("target_stock", 0)
+        
+        if curr_stock < payload.quantity:
+            raise HTTPException(status_code=400, detail="Insufficient stock")
+            
+        new_stock = curr_stock - payload.quantity
+        
+        # Update database
+        db.stores.update_one(
+            {"name": payload.storeName},
+            {"$set": {"current_stock": new_stock}}
+        )
+        add_log(f"Purchase: {payload.quantity}x '{payload.itemName}' from '{payload.storeName}'. Stock: {curr_stock} -> {new_stock}")
+        
+        # Readjust discount dynamically in active promotions
+        surplus = new_stock - target_stock
+        
+        # We loop through a copy of active_promotions to safely modify it
+        for promo in list(active_promotions):
+            if promo["store_name"].lower() == payload.storeName.lower():
+                if surplus <= 0:
+                    active_promotions.remove(promo)
+                    add_log(f"Promotion expired for '{payload.storeName}' because stock reached target threshold.")
+                else:
+                    # Scale discount based on surplus
+                    if surplus >= 100:
+                        discount = 50
+                    elif surplus >= 70:
+                        discount = 40
+                    elif surplus >= 40:
+                        discount = 30
+                    elif surplus >= 20:
+                        discount = 20
+                    else:
+                        discount = 10
+                        
+                    promo["discount_code"] = f"SURGE{discount}_{payload.storeName.replace(' ', '')[:5].upper()}"
+                    promo["message"] = f"Tourist Surge Alert! Get {discount}% off on '{payload.itemName}' at {payload.storeName}! Hurry, offer valid for a limited time."
+                    add_log(f"Discount readjusted for '{payload.storeName}': {discount}% off (Surplus: {surplus})")
+                break
+                
+        # Return updated stores and active promotions
+        updated_stores = list(db.stores.find({}))
+        for s in updated_stores:
+            s["_id"] = str(s["_id"])
+            
+        tenant_stores = {s["name"].lower() for s in updated_stores}
+        filtered_promos = [p for p in active_promotions if p["store_name"].lower() in tenant_stores]
+        
+        return {
+            "status": "success",
+            "stores": updated_stores,
+            "promotions": filtered_promos
+        }
+    except Exception as e:
+        add_log(f"Purchase failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ==========================================
 # EXISTING LEGACY COMPATIBILITY ENDPOINTS
 # ==========================================

@@ -301,5 +301,64 @@ class TestAntigravityUpgrades(unittest.TestCase):
         
         print("[SUCCESS] Vector similarity search fallback, Gemini creativity prompts, and feedback loop verified.")
 
+    # ==========================================
+    # UPGRADE FOLLOW-UP: RETAIL SIMULATOR PURCHASE TEST
+    # ==========================================
+    def test_purchase_item_api(self):
+        print("\n--- Running Upgrade Follow-up: Purchase API Tests ---")
+        import asyncio
+        from main import purchase_item, PurchasePayload, active_promotions
+        
+        # A. Setup initial store and promotion
+        set_current_tenant_id("default_tenant")
+        db.stores.insert_one({
+            "name": "World Cup Athletics",
+            "item": "World Cup Jersey",
+            "current_stock": 100,
+            "target_stock": 20,
+            "wholesalePrice": 45.0
+        })
+        
+        active_promotions.clear()
+        active_promotions.append({
+            "id": "promo_1",
+            "store_name": "World Cup Athletics",
+            "item": "World Cup Jersey",
+            "discount_code": "SURGE50_WORLD",
+            "message": "50% off!",
+            "duration_minutes": 15,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
+        
+        # B. Make purchase that decrements stock but keeps surplus high
+        result = asyncio.run(purchase_item(PurchasePayload(
+            storeName="World Cup Athletics",
+            itemName="World Cup Jersey",
+            quantity=10
+        )))
+        
+        self.assertEqual(result["status"], "success")
+        
+        # Stock: 100 -> 90. Surplus: 90 - 20 = 70. Discount should scale to 40%
+        store = db.stores.find_one({"name": "World Cup Athletics"})
+        self.assertEqual(store["current_stock"], 90)
+        
+        self.assertEqual(len(result["promotions"]), 1)
+        self.assertIn("SURGE40", result["promotions"][0]["discount_code"])
+        
+        # C. Make purchase that triggers promotion expiration (stock <= target_stock)
+        result_exp = asyncio.run(purchase_item(PurchasePayload(
+            storeName="World Cup Athletics",
+            itemName="World Cup Jersey",
+            quantity=70 # Stock goes to 20, which is <= target_stock (20)
+        )))
+        
+        self.assertEqual(len(result_exp["promotions"]), 0) # Promo expired and cleared
+        
+        store = db.stores.find_one({"name": "World Cup Athletics"})
+        self.assertEqual(store["current_stock"], 20)
+        
+        print("[SUCCESS] Dynamic purchase dynamic stock scaling and auto-expiration verified.")
+
 if __name__ == "__main__":
     unittest.main()

@@ -13,6 +13,7 @@ interface Store {
   item: string;
   current_stock: number;
   target_stock: number;
+  wholesalePrice?: number;
 }
 
 interface Promotion {
@@ -48,28 +49,32 @@ const INITIAL_MOCK_STORES: Store[] = [
     location: { type: "Point", coordinates: [121.501, 31.240] },
     item: "World Cup Jersey",
     current_stock: 150,
-    target_stock: 20
+    target_stock: 20,
+    wholesalePrice: 45.0
   },
   {
     name: "Fan Zone Goods",
     location: { type: "Point", coordinates: [121.502, 31.241] },
     item: "Mascot Cap",
     current_stock: 80,
-    target_stock: 10
+    target_stock: 10,
+    wholesalePrice: 12.0
   },
   {
     name: "Champions Souvenirs",
     location: { type: "Point", coordinates: [121.515, 31.245] },
     item: "Tournament Soccer Ball",
     current_stock: 120,
-    target_stock: 30
+    target_stock: 30,
+    wholesalePrice: 18.0
   },
   {
     name: "Stadium Snacks & Gear",
     location: { type: "Point", coordinates: [121.516, 31.246] },
     item: "Reusable Water Bottle",
     current_stock: 60,
-    target_stock: 15
+    target_stock: 15,
+    wholesalePrice: 4.5
   }
 ];
 
@@ -87,6 +92,15 @@ export default function Home() {
   const [tick, setTick] = useState<number>(0);
   const [logFilter, setLogFilter] = useState<string>("");
   const [systemTime, setSystemTime] = useState<string>("");
+
+  // New Tab & Simulator States
+  const [activeTab, setActiveTab] = useState<'operations' | 'shopping'>('operations');
+  const [searchZoneA, setSearchZoneA] = useState<string>("");
+  const [searchZoneB, setSearchZoneB] = useState<string>("");
+  const [sentimentResultA, setSentimentResultA] = useState<any>(null);
+  const [sentimentResultB, setSentimentResultB] = useState<any>(null);
+  const [isSearchingA, setIsSearchingA] = useState<boolean>(false);
+  const [isSearchingB, setIsSearchingB] = useState<boolean>(false);
 
   const terminalEndRef = useRef<HTMLDivElement>(null);
 
@@ -295,6 +309,202 @@ export default function Home() {
     }
   };
 
+  const getBaseDiscount = (storeName: string) => {
+    const promo = promotions.find(p => p.store_name.toLowerCase() === storeName.toLowerCase());
+    if (!promo) return 0;
+    const match = promo.discount_code.match(/SURGE(\d+)/i);
+    return match ? parseInt(match[1]) : 10;
+  };
+
+  const getCalculatedDiscount = (storeName: string, itemName: string, zone: "A" | "B") => {
+    const baseDiscount = getBaseDiscount(storeName);
+    const query = zone === "A" ? searchZoneA : searchZoneB;
+    const sentimentResult = zone === "A" ? sentimentResultA : sentimentResultB;
+    
+    let keywordBoost = 0;
+    if (query.trim().length >= 2 && itemName.toLowerCase().includes(query.trim().toLowerCase())) {
+      keywordBoost = 10;
+    }
+    
+    let sentimentBoost = 0;
+    if (sentimentResult) {
+      const msg = sentimentResult.empatheticMessage.toLowerCase();
+      const q = query.toLowerCase();
+      
+      if (itemName.toLowerCase().includes("jersey") || itemName.toLowerCase().includes("cap")) {
+        if (q.includes("fan") || q.includes("match") || q.includes("wear") || q.includes("shirt") || msg.includes("jersey") || msg.includes("apparel") || msg.includes("athletics")) {
+          sentimentBoost = 15;
+        }
+      }
+      if (itemName.toLowerCase().includes("ball") || itemName.toLowerCase().includes("toy") || itemName.toLowerCase().includes("game")) {
+        if (q.includes("kid") || q.includes("child") || q.includes("cry") || msg.includes("kids") || msg.includes("crying") || msg.includes("play")) {
+          sentimentBoost = 15;
+        }
+      }
+      if (itemName.toLowerCase().includes("bottle") || itemName.toLowerCase().includes("water") || itemName.toLowerCase().includes("snack") || itemName.toLowerCase().includes("fan") || itemName.toLowerCase().includes("yogurt")) {
+        if (q.includes("hot") || q.includes("heat") || q.includes("sun") || q.includes("thirsty") || msg.includes("heat") || msg.includes("hot") || msg.includes("cool")) {
+          sentimentBoost = 15;
+        }
+      }
+    }
+    
+    return {
+      base: baseDiscount,
+      keywordBoost,
+      sentimentBoost,
+      total: Math.min(90, baseDiscount + keywordBoost + sentimentBoost)
+    };
+  };
+
+  const filterStoreByQuery = (store: Store, query: string) => {
+    if (!query.trim()) return true;
+    const q = query.toLowerCase();
+    const itemName = store.item || "";
+    const name = store.name || "";
+    return itemName.toLowerCase().includes(q) || name.toLowerCase().includes(q);
+  };
+
+  const handleSearchSentiment = async (zone: "A" | "B") => {
+    const query = zone === "A" ? searchZoneA : searchZoneB;
+    if (!query.trim()) return;
+
+    if (zone === "A") {
+      setIsSearchingA(true);
+      setSentimentResultA(null);
+    } else {
+      setIsSearchingB(true);
+      setSentimentResultB(null);
+    }
+
+    const coords = zone === "A" ? [121.501, 31.240] : [121.515, 31.245];
+
+    if (backendOnline) {
+      try {
+        const response = await fetch(`${API_BASE}/api/nexus/sentiment-search`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            queryText: query,
+            location: coords
+          })
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (zone === "A") {
+            setSentimentResultA(data);
+          } else {
+            setSentimentResultB(data);
+          }
+          const msg = `[SENTIMENT] Search resolved user mood to zone '${data.zoneName}'. Campaign: '${data.offer.title}'`;
+          setLogs(prev => [...prev, { timestamp: new Date().toISOString(), message: msg }]);
+        } else {
+          throw new Error("Sentiment search failed");
+        }
+      } catch (err: any) {
+        console.error("Sentiment search error:", err);
+      } finally {
+        if (zone === "A") {
+          setIsSearchingA(false);
+        } else {
+          setIsSearchingB(false);
+        }
+      }
+    } else {
+      setTimeout(() => {
+        const mockResult = {
+          zoneName: zone === "A" ? "Zone A // West Wing" : "Zone B // East Wing",
+          empatheticMessage: query.toLowerCase().includes("hot") || query.toLowerCase().includes("tired")
+            ? "We see you are feeling hot and exhausted. Take a breather! Enjoy our cooling specials at a discounted price near you."
+            : "We matched your request! Enjoy this custom localized promotion designed just for your visit today.",
+          offer: {
+            title: "👪 Cool Play Family Bundle",
+            description: "Special dynamic mock discount applied to your matches!"
+          }
+        };
+        if (zone === "A") {
+          setSentimentResultA(mockResult);
+          setIsSearchingA(false);
+        } else {
+          setSentimentResultB(mockResult);
+          setIsSearchingB(false);
+        }
+      }, 500);
+    }
+  };
+
+  const handleBuyItem = async (storeName: string, itemName: string) => {
+    if (backendOnline) {
+      try {
+        const response = await fetch(`${API_BASE}/api/purchase`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            storeName,
+            itemName,
+            quantity: 1
+          })
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setStores(data.stores);
+          setPromotions(data.promotions);
+          
+          const msg = `[PURCHASE] 1x '${itemName}' bought from '${storeName}'. Database stock updated and discount readjusted.`;
+          setLogs(prev => [...prev, { timestamp: new Date().toISOString(), message: msg }]);
+        } else {
+          const errData = await response.json();
+          alert(`Purchase failed: ${errData.detail}`);
+        }
+      } catch (err: any) {
+        console.error("Purchase error:", err);
+      }
+    } else {
+      const updated = mockStoresRef.current.map(store => {
+        if (store.name.toLowerCase() === storeName.toLowerCase()) {
+          const new_stock = Math.max(0, store.current_stock - 1);
+          const target = store.target_stock;
+          const surplus = new_stock - target;
+          
+          mockPromotionsRef.current = mockPromotionsRef.current.map(promo => {
+            if (promo.store_name.toLowerCase() === storeName.toLowerCase()) {
+              if (surplus <= 0) {
+                return null;
+              } else {
+                let discount = 10;
+                if (surplus >= 100) discount = 50;
+                else if (surplus >= 70) discount = 40;
+                else if (surplus >= 40) discount = 30;
+                else if (surplus >= 20) discount = 20;
+                
+                return {
+                  ...promo,
+                  discount_code: `SURGE${discount}_${storeName.replace(' ', '').slice(0, 5).toUpperCase()}`,
+                  message: `Tourist Surge Alert! Get ${discount}% off on '${itemName}' at ${storeName}! Hurry, offer valid for a limited time.`
+                };
+              }
+            }
+            return promo;
+          }).filter(Boolean) as Promotion[];
+          
+          setPromotions([...mockPromotionsRef.current]);
+          
+          return {
+            ...store,
+            current_stock: new_stock
+          };
+        }
+        return store;
+      });
+      
+      mockStoresRef.current = updated;
+      setStores(updated);
+      
+      const msg = `[MOCK PURCHASE] 1x '${itemName}' bought from '${storeName}'. Local stock updated and discount readjusted.`;
+      mockLogsRef.current.push({ timestamp: new Date().toISOString(), message: msg });
+      setLogs([...mockLogsRef.current]);
+    }
+  };
+
   const filteredLogs = useMemo(() => {
     if (!logFilter.trim()) return logs;
     const q = logFilter.toLowerCase();
@@ -404,6 +614,30 @@ export default function Home() {
           </p>
         </div>
 
+        {/* Dynamic Tab Switcher */}
+        <div className="flex bg-zinc-950/60 p-1 rounded-md border border-zinc-900">
+          <button 
+            onClick={() => setActiveTab('operations')}
+            className={`px-4 py-1.5 rounded-sm text-xs font-semibold uppercase tracking-wider transition-all cursor-pointer select-none ${
+              activeTab === 'operations' 
+                ? "bg-zinc-900/80 text-emerald-400 font-bold border border-zinc-800/40 shadow-sm" 
+                : "text-zinc-500 hover:text-zinc-400"
+            }`}
+          >
+            Operations
+          </button>
+          <button 
+            onClick={() => setActiveTab('shopping')}
+            className={`px-4 py-1.5 rounded-sm text-xs font-semibold uppercase tracking-wider transition-all cursor-pointer select-none ${
+              activeTab === 'shopping' 
+                ? "bg-zinc-900/80 text-emerald-400 font-bold border border-zinc-800/40 shadow-sm" 
+                : "text-zinc-500 hover:text-zinc-400"
+            }`}
+          >
+            Shopping Simulator
+          </button>
+        </div>
+
         <div className="flex items-center space-x-3 font-mono text-[11px]">
           <div className={`flex items-center space-x-2 px-3 py-1 rounded border transition-colors ${
             backendOnline 
@@ -421,307 +655,617 @@ export default function Home() {
       </header>
 
       {/* DASHBOARD GRID */}
-      <main className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-5 p-5 overflow-hidden">
-        
-        {/* LEFT COLUMN: MALL MAP & CONTROLS */}
-        <section className="flex flex-col border border-zinc-900 bg-zinc-900/20 rounded-lg overflow-hidden relative">
-          <div className="shrink-0 bg-zinc-900/40 border-b border-zinc-900 px-4 py-3 flex items-center justify-between">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-300">
-              Mall Map & Radar
-            </h2>
-            {isSimulating && (
-              <span className="text-[10px] text-zinc-400 font-mono tracking-wider animate-pulse">
-                SCANNING...
+      {activeTab === 'operations' ? (
+        <main className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-5 p-5 overflow-hidden">
+          
+          {/* LEFT COLUMN: MALL MAP & CONTROLS */}
+          <section className="flex flex-col border border-zinc-900 bg-zinc-900/20 rounded-lg overflow-hidden relative">
+            <div className="shrink-0 bg-zinc-900/40 border-b border-zinc-900 px-4 py-3 flex items-center justify-between">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-300">
+                Mall Map & Radar
+              </h2>
+              {isSimulating && (
+                <span className="text-[10px] text-zinc-400 font-mono tracking-wider animate-pulse">
+                  SCANNING...
+                </span>
+              )}
+            </div>
+
+            <div className="flex-1 p-5 flex flex-col justify-between overflow-y-auto">
+              {/* Interactive Grid Map */}
+              <div className="relative border border-zinc-900 rounded bg-zinc-950/40 p-2 flex items-center justify-center aspect-[4/3] max-h-[300px]">
+                
+                {/* Radar waves */}
+                {isSimulating && activeZone === "A" && (
+                  <div className="absolute left-[25%] top-[50%] -translate-x-1/2 -translate-y-1/2 w-40 h-40 pointer-events-none">
+                    <div className="absolute inset-0 rounded-full border border-emerald-500/20 animate-[ping_1.6s_infinite]" />
+                    <div className="absolute inset-8 rounded-full border border-emerald-500/10 animate-[ping_2s_infinite]" />
+                  </div>
+                )}
+
+                {isSimulating && activeZone === "B" && (
+                  <div className="absolute left-[75%] top-[55%] -translate-x-1/2 -translate-y-1/2 w-40 h-40 pointer-events-none">
+                    <div className="absolute inset-0 rounded-full border border-emerald-500/20 animate-[ping_1.6s_infinite]" />
+                    <div className="absolute inset-8 rounded-full border border-emerald-500/10 animate-[ping_2s_infinite]" />
+                  </div>
+                )}
+
+                {/* Mall Layout SVG */}
+                <svg className="w-full h-full text-zinc-700" viewBox="0 0 400 300">
+                  <defs>
+                    <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+                      <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgba(63, 63, 70, 0.15)" strokeWidth="0.5" />
+                    </pattern>
+                  </defs>
+                  <rect width="400" height="300" fill="url(#grid)" />
+
+                  {/* Walkways */}
+                  <rect x="20" y="120" width="360" height="60" rx="2" fill="rgba(24, 24, 27, 0.4)" stroke="#27272a" strokeWidth="0.5" />
+                  <rect x="180" y="30" width="40" height="240" rx="2" fill="rgba(24, 24, 27, 0.4)" stroke="#27272a" strokeWidth="0.5" />
+
+                  {/* ZONE A (West Wing) */}
+                  <rect 
+                    x="25" y="45" width="135" height="210" 
+                    fill="none" 
+                    stroke={activeZone === "A" ? "#10b981" : "#27272a"} 
+                    strokeWidth={activeZone === "A" ? "1.5" : "1"} 
+                    strokeDasharray="3,3"
+                    className="transition-colors duration-300"
+                  />
+                  <text x="92" y="245" fontSize="9" fill={activeZone === "A" ? "#34d399" : "#52525b"} textAnchor="middle" fontWeight="bold">ZONE A // WEST WING</text>
+
+                  {/* ZONE A - World Cup Athletics */}
+                  <g onClick={() => handleSimulateSurge("A")} className="cursor-pointer">
+                    <rect x="35" y="60" width="55" height="40" rx="2" fill="#09090b" stroke="#3f3f46" strokeWidth="1" className="hover:stroke-zinc-400 transition-colors" />
+                    <text x="62.5" y="82" fontSize="7" fill="#f4f4f5" textAnchor="middle" fontWeight="medium">Athletics</text>
+                    <circle cx="62.5" cy="92" r="2" fill="#ef4444" />
+                  </g>
+
+                  {/* ZONE A - Fan Zone Goods */}
+                  <g onClick={() => handleSimulateSurge("A")} className="cursor-pointer">
+                    <rect x="95" y="60" width="55" height="40" rx="2" fill="#09090b" stroke="#3f3f46" strokeWidth="1" className="hover:stroke-zinc-400 transition-colors" />
+                    <text x="122.5" y="82" fontSize="7" fill="#f4f4f5" textAnchor="middle" fontWeight="medium">Fan Zone</text>
+                    <circle cx="122.5" cy="92" r="2" fill="#ef4444" />
+                  </g>
+
+                  {/* ZONE B (East Wing) */}
+                  <rect 
+                    x="240" y="45" width="135" height="210" 
+                    fill="none" 
+                    stroke={activeZone === "B" ? "#10b981" : "#27272a"} 
+                    strokeWidth={activeZone === "B" ? "1.5" : "1"} 
+                    strokeDasharray="3,3"
+                    className="transition-colors duration-300"
+                  />
+                  <text x="307" y="245" fontSize="9" fill={activeZone === "B" ? "#34d399" : "#52525b"} textAnchor="middle" fontWeight="bold">ZONE B // EAST WING</text>
+
+                  {/* ZONE B - Champions Souvenirs */}
+                  <g onClick={() => handleSimulateSurge("B")} className="cursor-pointer">
+                    <rect x="250" y="190" width="55" height="40" rx="2" fill="#09090b" stroke="#3f3f46" strokeWidth="1" className="hover:stroke-zinc-400 transition-colors" />
+                    <text x="277.5" y="212" fontSize="7" fill="#f4f4f5" textAnchor="middle" fontWeight="medium">Champions</text>
+                    <circle cx="277.5" cy="222" r="2" fill="#ef4444" />
+                  </g>
+
+                  {/* ZONE B - Stadium Snacks & Gear */}
+                  <g onClick={() => handleSimulateSurge("B")} className="cursor-pointer">
+                    <rect x="310" y="190" width="55" height="40" rx="2" fill="#09090b" stroke="#3f3f46" strokeWidth="1" className="hover:stroke-zinc-400 transition-colors" />
+                    <text x="337.5" y="212" fontSize="7" fill="#f4f4f5" textAnchor="middle" fontWeight="medium">Stadium</text>
+                    <circle cx="337.5" cy="222" r="2" fill="#ef4444" />
+                  </g>
+                </svg>
+              </div>
+
+              {/* Metrics */}
+              <div className="mt-4 border border-zinc-900 bg-zinc-950/40 rounded p-3 text-[11px] font-mono space-y-2">
+                <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">GEOSPATIAL METRICS</div>
+                <div className="grid grid-cols-2 gap-2 text-zinc-300">
+                  <div>Zone scan: <span className="text-zinc-100 font-bold">{activeZone ? `Zone ${activeZone}` : "Standby"}</span></div>
+                  <div>Range: <span className="text-zinc-100 font-bold">{activeZone ? "500m" : "0m"}</span></div>
+                  <div className="col-span-2">Coordinates: <span className="text-zinc-100 font-bold">{lastScanCoords ? `${lastScanCoords[0].toFixed(3)}, ${lastScanCoords[1].toFixed(3)}` : "Standby"}</span></div>
+                </div>
+              </div>
+
+              {/* Simulated Triggers */}
+              <div className="mt-4 space-y-2.5">
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => handleSimulateSurge("A")}
+                    disabled={isSimulating}
+                    className="py-2 px-3 border border-zinc-800 hover:border-zinc-700 bg-zinc-900/60 hover:bg-zinc-800/80 text-zinc-200 text-[11px] rounded transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed select-none active:scale-[0.98]"
+                  >
+                    SURGE ZONE A
+                  </button>
+                  <button
+                    onClick={() => handleSimulateSurge("B")}
+                    disabled={isSimulating}
+                    className="py-2 px-3 border border-zinc-800 hover:border-zinc-700 bg-zinc-900/60 hover:bg-zinc-800/80 text-zinc-200 text-[11px] rounded transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed select-none active:scale-[0.98]"
+                  >
+                    SURGE ZONE B
+                  </button>
+                </div>
+
+                <button
+                  onClick={handleSeedDB}
+                  className="w-full flex items-center justify-center space-x-2 py-2 px-3 border border-zinc-800 hover:border-zinc-700 bg-zinc-900/30 hover:bg-zinc-900/60 text-zinc-400 hover:text-zinc-300 text-[11px] rounded transition-all cursor-pointer select-none active:scale-[0.98]"
+                >
+                  <span>RESET STOCKS & CODES</span>
+                </button>
+              </div>
+            </div>
+          </section>
+
+          {/* CENTER COLUMN: SYSTEM TERMINAL */}
+          <section className="flex flex-col border border-zinc-900 bg-zinc-900/20 rounded-lg overflow-hidden">
+            <div className="shrink-0 bg-zinc-900/40 border-b border-zinc-900 px-4 py-3 flex items-center justify-between">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-300">
+                System Console Logs
+              </h2>
+              <div className="flex space-x-1">
+                <span className="w-2 h-2 rounded-full bg-zinc-800" />
+                <span className="w-2 h-2 rounded-full bg-zinc-800" />
+                <span className="w-2 h-2 rounded-full bg-zinc-800" />
+              </div>
+            </div>
+
+            <div className="p-4 border-b border-zinc-900 bg-zinc-950/20">
+              <input 
+                type="text"
+                placeholder="grep -i filter..."
+                value={logFilter}
+                onChange={e => setLogFilter(e.target.value)}
+                className="w-full px-3 py-1.5 rounded bg-zinc-900/50 border border-zinc-800 focus:outline-none focus:border-zinc-700 text-[11px] text-zinc-300 font-mono placeholder:text-zinc-650 transition-colors"
+              />
+            </div>
+
+            <div className="flex-1 p-4 overflow-y-auto bg-black/60 flex flex-col justify-start">
+              <div className="space-y-0.5 font-mono">
+                {filteredLogs.length === 0 ? (
+                  <div className="text-zinc-700 text-[11px] italic p-2 text-center">
+                    No log entries available.
+                  </div>
+                ) : (
+                  filteredLogs.map((log, idx) => renderLogLine(log, idx))
+                )}
+                <div ref={terminalEndRef} />
+              </div>
+            </div>
+          </section>
+
+          {/* RIGHT COLUMN: DIGITAL SIGNAGE DECK */}
+          <section className="flex flex-col border border-zinc-900 bg-zinc-900/20 rounded-lg overflow-hidden">
+            <div className="shrink-0 bg-zinc-900/40 border-b border-zinc-900 px-4 py-3 flex items-center justify-between">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-300">
+                Active Promotions Signage
+              </h2>
+              <span className="text-[10px] font-mono text-zinc-400 bg-zinc-900/60 px-2 py-0.5 rounded border border-zinc-800">
+                ACTIVE: {promotions.length}
+              </span>
+            </div>
+
+            <div className="flex-1 p-4 overflow-y-auto space-y-4">
+              {promotions.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-center p-6 border border-dashed border-zinc-900 rounded bg-zinc-950/10">
+                  <svg className="h-8 w-8 text-zinc-700 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" />
+                  </svg>
+                  <div className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest">
+                    No Active Promotions
+                  </div>
+                  <p className="text-[10px] text-zinc-600 mt-1 max-w-[200px]">
+                    Surge A or B scan sweeps will deploy retail agent flash code sales here.
+                  </p>
+                </div>
+              ) : (
+                [...promotions].reverse().map(promo => {
+                  const store = getStoreForPromo(promo);
+                  const currentStock = store ? store.current_stock : 100;
+                  const targetStock = store ? store.target_stock : 20;
+                  const initialStock = store ? (store.name.includes("World Cup") ? 150 : store.name.includes("Champions") ? 120 : store.name.includes("Fan") ? 80 : 60) : 150;
+                  const safetyThresholdPercent = (targetStock / initialStock) * 100;
+                  const currentStockPercent = Math.min(100, (currentStock / initialStock) * 100);
+
+                  const remainingSeconds = getRemainingSeconds(promo);
+                  const isExpired = remainingSeconds <= 0;
+
+                  if (isExpired) return null;
+
+                  const isCritical = currentStock <= targetStock;
+                  const stockBarColor = isCritical 
+                    ? "bg-rose-500/80" 
+                    : currentStock <= targetStock + 20 
+                      ? "bg-amber-500/80" 
+                      : "bg-emerald-500/80";
+
+                  return (
+                    <div 
+                      key={promo.id} 
+                      className="relative border border-zinc-900 bg-zinc-950/70 hover:border-zinc-800 rounded-md p-4 transition-all flex flex-col justify-between"
+                    >
+                      {/* Top indicator bar */}
+                      <div className="absolute top-0 left-0 right-0 h-[2px] bg-zinc-800" />
+                      
+                      {/* Store Title */}
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <h3 className="text-xs font-bold text-white tracking-tight leading-tight">{promo.store_name}</h3>
+                          <p className="text-[10px] text-zinc-400 mt-0.5">Surplus item: {promo.item}</p>
+                        </div>
+                        <div className="flex flex-col items-end">
+                          <span className="text-[9px] px-1.5 py-0.5 font-bold tracking-widest bg-zinc-900 border border-zinc-800 text-zinc-300 rounded font-mono">
+                            FLASH CODE
+                          </span>
+                          
+                          {/* Countdown */}
+                          <div className="flex items-center space-x-1 mt-1 text-[10px] font-mono text-zinc-400 font-bold">
+                            <span className="h-1.5 w-1.5 rounded-full bg-rose-500 animate-pulse" />
+                            <span>{formatCountdown(remainingSeconds)}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Message */}
+                      <div className="my-3 px-3 py-2 border-l border-zinc-700 bg-zinc-900/30 text-[11px] text-zinc-300 italic leading-relaxed">
+                        "{promo.message}"
+                      </div>
+
+                      {/* Stock level indicators */}
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between text-[9px] text-zinc-500 font-mono">
+                          <span>STOCK STATUS</span>
+                          <span className={isCritical ? "text-rose-400 font-bold" : "text-zinc-355"}>
+                            {isCritical ? "CRITICAL MINIMUM" : "ADEQUATE"} ({currentStock} / {initialStock})
+                          </span>
+                        </div>
+
+                        {/* Progress Bar Container */}
+                        <div className="relative w-full h-3 bg-zinc-950 border border-zinc-900 rounded overflow-hidden p-[2px]">
+                          {/* Stock progress */}
+                          <div 
+                            className={`h-full ${stockBarColor} rounded-sm transition-all duration-500`}
+                            style={{ width: `${currentStockPercent}%` }}
+                          />
+                          {/* Safety line indicator */}
+                          <div 
+                            className="absolute top-0 bottom-0 w-[1.5px] bg-amber-500/80 border-r border-zinc-950"
+                            style={{ left: `${safetyThresholdPercent}%` }}
+                            title={`Safety Target Threshold: ${targetStock} units`}
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-between text-[8px] text-zinc-650 font-mono pt-0.5">
+                          <span>MIN SECURE TARGET: {targetStock} units</span>
+                          <span>MAX CAP: {initialStock} units</span>
+                        </div>
+                      </div>
+
+                      {/* Coupon */}
+                      <div className="mt-3 relative border border-dashed border-zinc-800 bg-zinc-900/20 rounded py-2 flex flex-col items-center justify-center">
+                        <div className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider font-mono">REDEMPTION CODE</div>
+                        <div className="text-xs font-bold font-mono text-zinc-100 tracking-wider mt-0.5 select-all">
+                          {promo.discount_code}
+                        </div>
+                      </div>
+
+                      {/* Barcode representation */}
+                      <div className="flex items-center justify-between h-5 bg-zinc-900/30 px-2 rounded mt-3 border border-zinc-900/50">
+                        <div className="flex h-3 items-stretch space-x-[1px]">
+                          {[1, 2, 1, 3, 2, 1, 3, 1, 4, 1, 2, 3, 1, 2, 4, 1].map((w, i) => (
+                            <span key={i} className="bg-zinc-700" style={{ width: `${w}px` }} />
+                          ))}
+                        </div>
+                        <span className="font-mono text-[8px] text-zinc-500 tracking-wider">
+                          ID: {promo.id.toUpperCase()}
+                        </span>
+                      </div>
+
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </section>
+
+        </main>
+      ) : (
+        <main className="flex-1 flex flex-col p-5 overflow-y-auto space-y-5">
+          {/* Main Simulator Header */}
+          <div className="shrink-0 flex items-center justify-between border-b border-zinc-900 pb-3">
+            <div>
+              <h2 className="text-sm font-bold uppercase tracking-wider text-zinc-300">
+                User Simulator Shopping Deck
+              </h2>
+              <p className="text-[10px] text-zinc-500 font-mono mt-0.5">
+                Simulate consumer experience, browse real-time inventory, search by sentiment mood, and trigger transaction purchases.
+              </p>
+            </div>
+            {backendOnline && (
+              <span className="text-[10px] font-mono text-emerald-400 bg-zinc-900/40 px-2 py-0.5 rounded border border-emerald-950/20">
+                LIVE DB TRANSACTIONS ACTIVE
               </span>
             )}
           </div>
 
-          <div className="flex-1 p-5 flex flex-col justify-between overflow-y-auto">
-            {/* Interactive Grid Map */}
-            <div className="relative border border-zinc-900 rounded bg-zinc-950/40 p-2 flex items-center justify-center aspect-[4/3] max-h-[300px]">
-              
-              {/* Radar waves */}
-              {isSimulating && activeZone === "A" && (
-                <div className="absolute left-[25%] top-[50%] -translate-x-1/2 -translate-y-1/2 w-40 h-40 pointer-events-none">
-                  <div className="absolute inset-0 rounded-full border border-emerald-500/20 animate-[ping_1.6s_infinite]" />
-                  <div className="absolute inset-8 rounded-full border border-emerald-500/10 animate-[ping_2s_infinite]" />
+          <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-6 min-h-[500px]">
+            {/* COLUMN 1: ZONE A SHOPPING (WEST WING) */}
+            <div className="flex flex-col border border-zinc-900 bg-zinc-900/10 rounded-lg p-5 space-y-4">
+              <div className="flex items-center justify-between border-b border-zinc-900 pb-2">
+                <div className="flex items-center space-x-2">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-200">
+                    Zone A Shopping // West Wing
+                  </h3>
                 </div>
-              )}
-
-              {isSimulating && activeZone === "B" && (
-                <div className="absolute left-[75%] top-[55%] -translate-x-1/2 -translate-y-1/2 w-40 h-40 pointer-events-none">
-                  <div className="absolute inset-0 rounded-full border border-emerald-500/20 animate-[ping_1.6s_infinite]" />
-                  <div className="absolute inset-8 rounded-full border border-emerald-500/10 animate-[ping_2s_infinite]" />
-                </div>
-              )}
-
-              {/* Mall Layout SVG */}
-              <svg className="w-full h-full text-zinc-700" viewBox="0 0 400 300">
-                <defs>
-                  <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
-                    <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgba(63, 63, 70, 0.15)" strokeWidth="0.5" />
-                  </pattern>
-                </defs>
-                <rect width="400" height="300" fill="url(#grid)" />
-
-                {/* Walkways */}
-                <rect x="20" y="120" width="360" height="60" rx="2" fill="rgba(24, 24, 27, 0.4)" stroke="#27272a" strokeWidth="0.5" />
-                <rect x="180" y="30" width="40" height="240" rx="2" fill="rgba(24, 24, 27, 0.4)" stroke="#27272a" strokeWidth="0.5" />
-
-                {/* ZONE A (West Wing) */}
-                <rect 
-                  x="25" y="45" width="135" height="210" 
-                  fill="none" 
-                  stroke={activeZone === "A" ? "#10b981" : "#27272a"} 
-                  strokeWidth={activeZone === "A" ? "1.5" : "1"} 
-                  strokeDasharray="3,3"
-                  className="transition-colors duration-300"
-                />
-                <text x="92" y="245" fontSize="9" fill={activeZone === "A" ? "#34d399" : "#52525b"} textAnchor="middle" fontWeight="bold">ZONE A // WEST WING</text>
-
-                {/* ZONE A - World Cup Athletics */}
-                <g onClick={() => handleSimulateSurge("A")} className="cursor-pointer">
-                  <rect x="35" y="60" width="55" height="40" rx="2" fill="#09090b" stroke="#3f3f46" strokeWidth="1" className="hover:stroke-zinc-400 transition-colors" />
-                  <text x="62.5" y="82" fontSize="7" fill="#f4f4f5" textAnchor="middle" fontWeight="medium">Athletics</text>
-                  <circle cx="62.5" cy="92" r="2" fill="#ef4444" />
-                </g>
-
-                {/* ZONE A - Fan Zone Goods */}
-                <g onClick={() => handleSimulateSurge("A")} className="cursor-pointer">
-                  <rect x="95" y="60" width="55" height="40" rx="2" fill="#09090b" stroke="#3f3f46" strokeWidth="1" className="hover:stroke-zinc-400 transition-colors" />
-                  <text x="122.5" y="82" fontSize="7" fill="#f4f4f5" textAnchor="middle" fontWeight="medium">Fan Zone</text>
-                  <circle cx="122.5" cy="92" r="2" fill="#ef4444" />
-                </g>
-
-                {/* ZONE B (East Wing) */}
-                <rect 
-                  x="240" y="45" width="135" height="210" 
-                  fill="none" 
-                  stroke={activeZone === "B" ? "#10b981" : "#27272a"} 
-                  strokeWidth={activeZone === "B" ? "1.5" : "1"} 
-                  strokeDasharray="3,3"
-                  className="transition-colors duration-300"
-                />
-                <text x="307" y="245" fontSize="9" fill={activeZone === "B" ? "#34d399" : "#52525b"} textAnchor="middle" fontWeight="bold">ZONE B // EAST WING</text>
-
-                {/* ZONE B - Champions Souvenirs */}
-                <g onClick={() => handleSimulateSurge("B")} className="cursor-pointer">
-                  <rect x="250" y="190" width="55" height="40" rx="2" fill="#09090b" stroke="#3f3f46" strokeWidth="1" className="hover:stroke-zinc-400 transition-colors" />
-                  <text x="277.5" y="212" fontSize="7" fill="#f4f4f5" textAnchor="middle" fontWeight="medium">Champions</text>
-                  <circle cx="277.5" cy="222" r="2" fill="#ef4444" />
-                </g>
-
-                {/* ZONE B - Stadium Snacks & Gear */}
-                <g onClick={() => handleSimulateSurge("B")} className="cursor-pointer">
-                  <rect x="310" y="190" width="55" height="40" rx="2" fill="#09090b" stroke="#3f3f46" strokeWidth="1" className="hover:stroke-zinc-400 transition-colors" />
-                  <text x="337.5" y="212" fontSize="7" fill="#f4f4f5" textAnchor="middle" fontWeight="medium">Stadium</text>
-                  <circle cx="337.5" cy="222" r="2" fill="#ef4444" />
-                </g>
-              </svg>
-            </div>
-
-            {/* Metrics */}
-            <div className="mt-4 border border-zinc-900 bg-zinc-950/40 rounded p-3 text-[11px] font-mono space-y-2">
-              <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">GEOSPATIAL METRICS</div>
-              <div className="grid grid-cols-2 gap-2 text-zinc-300">
-                <div>Zone scan: <span className="text-zinc-100 font-bold">{activeZone ? `Zone ${activeZone}` : "Standby"}</span></div>
-                <div>Range: <span className="text-zinc-100 font-bold">{activeZone ? "500m" : "0m"}</span></div>
-                <div className="col-span-2">Coordinates: <span className="text-zinc-100 font-bold">{lastScanCoords ? `${lastScanCoords[0].toFixed(3)}, ${lastScanCoords[1].toFixed(3)}` : "Standby"}</span></div>
+                <span className="text-[9px] font-mono text-zinc-500">COORDINATES: [121.501, 31.240]</span>
               </div>
-            </div>
 
-            {/* Simulated Triggers */}
-            <div className="mt-4 space-y-2.5">
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => handleSimulateSurge("A")}
-                  disabled={isSimulating}
-                  className="py-2 px-3 border border-zinc-800 hover:border-zinc-700 bg-zinc-900/60 hover:bg-zinc-800/80 text-zinc-200 text-[11px] rounded transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed select-none active:scale-[0.98]"
+              {/* Search input Zone A */}
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <input 
+                    type="text" 
+                    placeholder="Search Zone A or type mood (e.g. 'hot and tired')" 
+                    value={searchZoneA}
+                    onChange={e => setSearchZoneA(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleSearchSentiment("A")}
+                    className="w-full px-3 py-2 text-xs rounded bg-zinc-950/70 border border-zinc-850 focus:outline-none focus:border-zinc-750 text-zinc-300 placeholder:text-zinc-650"
+                  />
+                  {searchZoneA && (
+                    <button 
+                      onClick={() => { setSearchZoneA(""); setSentimentResultA(null); }}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-zinc-500 hover:text-zinc-300 cursor-pointer"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <button 
+                  onClick={() => handleSearchSentiment("A")}
+                  disabled={isSearchingA || !searchZoneA.trim()}
+                  className="px-4 py-2 border border-zinc-800 bg-zinc-900/60 hover:bg-zinc-800/80 text-zinc-205 text-xs font-semibold rounded cursor-pointer transition-all disabled:opacity-40 disabled:cursor-not-allowed select-none active:scale-[0.98]"
                 >
-                  SURGE ZONE A
-                </button>
-                <button
-                  onClick={() => handleSimulateSurge("B")}
-                  disabled={isSimulating}
-                  className="py-2 px-3 border border-zinc-800 hover:border-zinc-700 bg-zinc-900/60 hover:bg-zinc-800/80 text-zinc-200 text-[11px] rounded transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed select-none active:scale-[0.98]"
-                >
-                  SURGE ZONE B
+                  {isSearchingA ? "Analyzing..." : "Search"}
                 </button>
               </div>
 
-              <button
-                onClick={handleSeedDB}
-                className="w-full flex items-center justify-center space-x-2 py-2 px-3 border border-zinc-800 hover:border-zinc-700 bg-zinc-900/30 hover:bg-zinc-900/60 text-zinc-400 hover:text-zinc-300 text-[11px] rounded transition-all cursor-pointer select-none active:scale-[0.98]"
-              >
-                <span>RESET STOCKS & CODES</span>
-              </button>
-            </div>
-          </div>
-        </section>
-
-        {/* CENTER COLUMN: SYSTEM TERMINAL */}
-        <section className="flex flex-col border border-zinc-900 bg-zinc-900/20 rounded-lg overflow-hidden">
-          <div className="shrink-0 bg-zinc-900/40 border-b border-zinc-900 px-4 py-3 flex items-center justify-between">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-300">
-              System Console Logs
-            </h2>
-            <div className="flex space-x-1">
-              <span className="w-2 h-2 rounded-full bg-zinc-800" />
-              <span className="w-2 h-2 rounded-full bg-zinc-800" />
-              <span className="w-2 h-2 rounded-full bg-zinc-800" />
-            </div>
-          </div>
-
-          <div className="shrink-0 border-b border-zinc-900 bg-zinc-950 px-3 py-2">
-            <input
-              type="text"
-              placeholder="grep -i filter..."
-              value={logFilter}
-              onChange={e => setLogFilter(e.target.value)}
-              className="w-full px-3 py-1.5 rounded bg-zinc-900/50 border border-zinc-800 focus:outline-none focus:border-zinc-700 text-[11px] text-zinc-300 font-mono placeholder:text-zinc-600 transition-colors"
-            />
-          </div>
-
-          <div className="flex-1 p-4 overflow-y-auto bg-black/60 flex flex-col justify-start">
-            <div className="space-y-0.5">
-              {filteredLogs.length === 0 ? (
-                <div className="text-zinc-700 text-[11px] font-mono italic p-2 text-center">
-                  No log entries available.
+              {/* Empathetic copy banner Zone A */}
+              {sentimentResultA && (
+                <div className="bg-purple-950/15 border border-purple-800/30 rounded p-3 text-[11px] text-purple-300 leading-relaxed shadow-sm relative overflow-hidden animate-[fadeIn_0.3s_ease]">
+                  <div className="absolute top-0 left-0 bottom-0 w-[3px] bg-purple-500" />
+                  <div className="font-bold text-[10px] uppercase tracking-wider text-purple-400 font-mono mb-1">Empathetic Target Campaign Offer</div>
+                  "{sentimentResultA.empatheticMessage}"
+                  {sentimentResultA.offer && (
+                    <div className="mt-1.5 text-[10px] font-bold text-zinc-400">
+                      Matched Offer: {sentimentResultA.offer.title} (+15% Sentiment Boost applied to category)
+                    </div>
+                  )}
                 </div>
-              ) : (
-                filteredLogs.map((log, idx) => renderLogLine(log, idx))
               )}
-              <div ref={terminalEndRef} />
-            </div>
-          </div>
-        </section>
 
-        {/* RIGHT COLUMN: DIGITAL SIGNAGE DECK */}
-        <section className="flex flex-col border border-zinc-900 bg-zinc-900/20 rounded-lg overflow-hidden">
-          <div className="shrink-0 bg-zinc-900/40 border-b border-zinc-900 px-4 py-3 flex items-center justify-between">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-300">
-              Active Promotions Signage
-            </h2>
-            <span className="text-[10px] font-mono text-zinc-400 bg-zinc-900/60 px-2 py-0.5 rounded border border-zinc-800">
-              ACTIVE: {promotions.length}
-            </span>
-          </div>
+              {/* Shopping Cards Zone A */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {(stores.length > 0 ? stores : INITIAL_MOCK_STORES)
+                  .filter(s => s.name === "World Cup Athletics" || s.name === "Fan Zone Goods")
+                  .filter(s => filterStoreByQuery(s, searchZoneA))
+                  .map(store => {
+                    const discounts = getCalculatedDiscount(store.name, store.item, "A");
+                    const originalPrice = (store.wholesalePrice ?? 20) * 1.5;
+                    const finalPrice = discounts.total > 0 
+                      ? originalPrice * (1 - discounts.total / 100) 
+                      : originalPrice;
+                    const maxStock = store.name.includes("World Cup") ? 150 : store.name.includes("Champions") ? 120 : store.name.includes("Fan") ? 80 : 60;
+                    const isCritical = store.current_stock <= store.target_stock;
 
-          <div className="flex-1 p-4 overflow-y-auto space-y-4">
-            {promotions.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-center p-6 border border-dashed border-zinc-900 rounded bg-zinc-950/10">
-                <svg className="h-8 w-8 text-zinc-700 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" />
-                </svg>
-                <div className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest">
-                  No Active Promotions
-                </div>
-                <p className="text-[10px] text-zinc-600 mt-1 max-w-[200px]">
-                  Surge A or B scan sweeps will deploy retail agent flash code sales here.
-                </p>
-              </div>
-            ) : (
-              [...promotions].reverse().map(promo => {
-                const store = getStoreForPromo(promo);
-                const currentStock = store ? store.current_stock : 100;
-                const targetStock = store ? store.target_stock : 20;
-                const initialStock = store ? (store.name.includes("World Cup") ? 150 : store.name.includes("Champions") ? 120 : store.name.includes("Fan") ? 80 : 60) : 150;
-                const safetyThresholdPercent = (targetStock / initialStock) * 100;
-                const currentStockPercent = Math.min(100, (currentStock / initialStock) * 100);
-
-                const remainingSeconds = getRemainingSeconds(promo);
-                const isExpired = remainingSeconds <= 0;
-
-                if (isExpired) return null;
-
-                const isCritical = currentStock <= targetStock;
-                const stockBarColor = isCritical 
-                  ? "bg-rose-500/80" 
-                  : currentStock <= targetStock + 20 
-                    ? "bg-amber-500/80" 
-                    : "bg-emerald-500/80";
-
-                return (
-                  <div 
-                    key={promo.id} 
-                    className="relative border border-zinc-900 bg-zinc-950/70 hover:border-zinc-800 rounded-md p-4 transition-all flex flex-col justify-between"
-                  >
-                    {/* Top indicator bar */}
-                    <div className="absolute top-0 left-0 right-0 h-[2px] bg-zinc-800" />
-                    
-                    {/* Store Title */}
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <h3 className="text-xs font-bold text-white tracking-tight leading-tight">{promo.store_name}</h3>
-                        <p className="text-[10px] text-zinc-400 mt-0.5">Surplus item: {promo.item}</p>
-                      </div>
-                      <div className="flex flex-col items-end">
-                        <span className="text-[9px] px-1.5 py-0.5 font-bold tracking-widest bg-zinc-900 border border-zinc-800 text-zinc-300 rounded font-mono">
-                          FLASH CODE
-                        </span>
+                    return (
+                      <div 
+                        key={store.name} 
+                        className="border border-zinc-900 bg-zinc-950/40 hover:border-zinc-850 p-4 rounded-md transition-all flex flex-col justify-between relative overflow-hidden"
+                      >
+                        {discounts.total > 0 && (
+                          <div className="absolute top-2 right-2 bg-rose-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm z-10">
+                            {discounts.total}% OFF
+                          </div>
+                        )}
                         
-                        {/* Countdown */}
-                        <div className="flex items-center space-x-1 mt-1 text-[10px] font-mono text-zinc-400 font-bold">
-                          <span className="h-1.5 w-1.5 rounded-full bg-rose-500 animate-pulse" />
-                          <span>{formatCountdown(remainingSeconds)}</span>
+                        <div className="space-y-1">
+                          <span className="text-[9px] uppercase tracking-wider text-zinc-550 font-mono">{store.name}</span>
+                          <h4 className="text-xs font-bold text-zinc-200">{store.item}</h4>
                         </div>
-                      </div>
-                    </div>
 
-                    {/* Message */}
-                    <div className="my-3 px-3 py-2 border-l border-zinc-700 bg-zinc-900/30 text-[11px] text-zinc-300 italic leading-relaxed">
-                      "{promo.message}"
-                    </div>
+                        <div className="mt-3 flex items-baseline space-x-2">
+                          <span className="text-sm font-extrabold text-white">
+                            ${finalPrice.toFixed(2)}
+                          </span>
+                          {discounts.total > 0 && (
+                            <span className="text-[10px] text-zinc-600 line-through">
+                              ${originalPrice.toFixed(2)}
+                            </span>
+                          )}
+                        </div>
 
-                    {/* Stock level indicators */}
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between text-[9px] text-zinc-500 font-mono">
-                        <span>STOCK STATUS</span>
-                        <span className={isCritical ? "text-rose-400 font-bold" : "text-zinc-300"}>
-                          {currentStock} UNITS (SAFE: {targetStock})
-                        </span>
-                      </div>
-                      <div className="relative h-1.5 bg-zinc-900 rounded-full overflow-hidden border border-zinc-900">
-                        {/* Safety Target Line */}
-                        <div 
-                          className="absolute top-0 bottom-0 w-[1px] bg-rose-800/80 z-10" 
-                          style={{ left: `${safetyThresholdPercent}%` }}
-                        />
-                        <div 
-                          className={`h-full rounded-full transition-all duration-1000 ${stockBarColor}`}
-                          style={{ width: `${currentStockPercent}%` }}
-                        />
-                      </div>
-                    </div>
+                        {(discounts.keywordBoost > 0 || discounts.sentimentBoost > 0) && (
+                          <div className="mt-2 flex flex-col gap-0.5 text-[8px] font-mono">
+                            {discounts.keywordBoost > 0 && (
+                              <span className="text-emerald-400">
+                                +10% Keyword Match Boost
+                              </span>
+                            )}
+                            {discounts.sentimentBoost > 0 && (
+                              <span className="text-purple-400">
+                                +15% Sentiment Target Boost
+                              </span>
+                            )}
+                          </div>
+                        )}
 
-                    {/* Coupon */}
-                    <div className="mt-3 relative border border-dashed border-zinc-800 bg-zinc-900/20 rounded py-2 flex flex-col items-center justify-center">
-                      <div className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider font-mono">REDEMPTION CODE</div>
-                      <div className="text-xs font-bold font-mono text-zinc-100 tracking-wider mt-0.5 select-all">
-                        {promo.discount_code}
-                      </div>
-                    </div>
+                        <div className="mt-4 space-y-1">
+                          <div className="flex justify-between text-[9px] font-mono text-zinc-500">
+                            <span>STOCK STATUS</span>
+                            <span className={isCritical ? "text-rose-400 font-semibold" : "text-zinc-350"}>
+                              {store.current_stock} / {maxStock}
+                            </span>
+                          </div>
+                          <div className="h-1 w-full bg-zinc-900 rounded-full overflow-hidden">
+                            <div 
+                              className={`h-full ${isCritical ? "bg-rose-500/80" : "bg-emerald-500/80"} transition-all duration-300`} 
+                              style={{ width: `${Math.min(100, (store.current_stock / maxStock) * 100)}%` }}
+                            />
+                          </div>
+                        </div>
 
-                    {/* Barcode representation */}
-                    <div className="flex items-center justify-between h-5 bg-zinc-900/30 px-2 rounded mt-3 border border-zinc-900/50">
-                      <div className="flex h-3 items-stretch space-x-[1px]">
-                        {[1, 2, 1, 3, 2, 1, 3, 1, 4, 1, 2, 3, 1, 2, 4, 1].map((w, i) => (
-                          <span key={i} className="bg-zinc-700" style={{ width: `${w}px` }} />
-                        ))}
+                        <button 
+                          onClick={() => handleBuyItem(store.name, store.item)}
+                          disabled={store.current_stock <= 0}
+                          className="mt-4 w-full py-1.5 px-3 border border-zinc-805 hover:border-zinc-700 bg-zinc-900/60 hover:bg-zinc-850 text-zinc-200 text-[10px] font-semibold rounded cursor-pointer transition-all disabled:opacity-40 disabled:cursor-not-allowed select-none active:scale-[0.98]"
+                        >
+                          {store.current_stock <= 0 ? "OUT OF STOCK" : "BUY ITEM"}
+                        </button>
                       </div>
-                      <span className="font-mono text-[8px] text-zinc-500 tracking-wider">
-                        ID: {promo.id.toUpperCase()}
-                      </span>
-                    </div>
+                    );
+                  })}
+              </div>
+            </div>
 
-                  </div>
-                );
-              })
-            )}
+            {/* COLUMN 2: ZONE B SHOPPING (EAST WING) */}
+            <div className="flex flex-col border border-zinc-900 bg-zinc-900/10 rounded-lg p-5 space-y-4">
+              <div className="flex items-center justify-between border-b border-zinc-900 pb-2">
+                <div className="flex items-center space-x-2">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-200">
+                    Zone B Shopping // East Wing
+                  </h3>
+                </div>
+                <span className="text-[9px] font-mono text-zinc-500">COORDINATES: [121.515, 31.245]</span>
+              </div>
+
+              {/* Search input Zone B */}
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <input 
+                    type="text" 
+                    placeholder="Search Zone B or type mood (e.g. 'hot and tired')" 
+                    value={searchZoneB}
+                    onChange={e => setSearchZoneB(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleSearchSentiment("B")}
+                    className="w-full px-3 py-2 text-xs rounded bg-zinc-950/70 border border-zinc-850 focus:outline-none focus:border-zinc-750 text-zinc-300 placeholder:text-zinc-650"
+                  />
+                  {searchZoneB && (
+                    <button 
+                      onClick={() => { setSearchZoneB(""); setSentimentResultB(null); }}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-zinc-500 hover:text-zinc-300 cursor-pointer"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <button 
+                  onClick={() => handleSearchSentiment("B")}
+                  disabled={isSearchingB || !searchZoneB.trim()}
+                  className="px-4 py-2 border border-zinc-800 bg-zinc-900/60 hover:bg-zinc-800/80 text-zinc-205 text-xs font-semibold rounded cursor-pointer transition-all disabled:opacity-40 disabled:cursor-not-allowed select-none active:scale-[0.98]"
+                >
+                  {isSearchingB ? "Analyzing..." : "Search"}
+                </button>
+              </div>
+
+              {/* Empathetic copy banner Zone B */}
+              {sentimentResultB && (
+                <div className="bg-purple-950/15 border border-purple-800/30 rounded p-3 text-[11px] text-purple-300 leading-relaxed shadow-sm relative overflow-hidden animate-[fadeIn_0.3s_ease]">
+                  <div className="absolute top-0 left-0 bottom-0 w-[3px] bg-purple-500" />
+                  <div className="font-bold text-[10px] uppercase tracking-wider text-purple-400 font-mono mb-1">Empathetic Target Campaign Offer</div>
+                  "{sentimentResultB.empatheticMessage}"
+                  {sentimentResultB.offer && (
+                    <div className="mt-1.5 text-[10px] font-bold text-zinc-400">
+                      Matched Offer: {sentimentResultB.offer.title} (+15% Sentiment Boost applied to category)
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Shopping Cards Zone B */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {(stores.length > 0 ? stores : INITIAL_MOCK_STORES)
+                  .filter(s => s.name === "Champions Souvenirs" || s.name === "Stadium Snacks & Gear")
+                  .filter(s => filterStoreByQuery(s, searchZoneB))
+                  .map(store => {
+                    const discounts = getCalculatedDiscount(store.name, store.item, "B");
+                    const originalPrice = (store.wholesalePrice ?? 20) * 1.5;
+                    const finalPrice = discounts.total > 0 
+                      ? originalPrice * (1 - discounts.total / 100) 
+                      : originalPrice;
+                    const maxStock = store.name.includes("World Cup") ? 150 : store.name.includes("Champions") ? 120 : store.name.includes("Fan") ? 80 : 60;
+                    const isCritical = store.current_stock <= store.target_stock;
+
+                    return (
+                      <div 
+                        key={store.name} 
+                        className="border border-zinc-900 bg-zinc-950/40 hover:border-zinc-850 p-4 rounded-md transition-all flex flex-col justify-between relative overflow-hidden"
+                      >
+                        {discounts.total > 0 && (
+                          <div className="absolute top-2 right-2 bg-rose-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm z-10">
+                            {discounts.total}% OFF
+                          </div>
+                        )}
+                        
+                        <div className="space-y-1">
+                          <span className="text-[9px] uppercase tracking-wider text-zinc-550 font-mono">{store.name}</span>
+                          <h4 className="text-xs font-bold text-zinc-200">{store.item}</h4>
+                        </div>
+
+                        <div className="mt-3 flex items-baseline space-x-2">
+                          <span className="text-sm font-extrabold text-white">
+                            ${finalPrice.toFixed(2)}
+                          </span>
+                          {discounts.total > 0 && (
+                            <span className="text-[10px] text-zinc-600 line-through">
+                              ${originalPrice.toFixed(2)}
+                            </span>
+                          )}
+                        </div>
+
+                        {(discounts.keywordBoost > 0 || discounts.sentimentBoost > 0) && (
+                          <div className="mt-2 flex flex-col gap-0.5 text-[8px] font-mono">
+                            {discounts.keywordBoost > 0 && (
+                              <span className="text-emerald-400">
+                                +10% Keyword Match Boost
+                              </span>
+                            )}
+                            {discounts.sentimentBoost > 0 && (
+                              <span className="text-purple-400">
+                                +15% Sentiment Target Boost
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+                        <div className="mt-4 space-y-1">
+                          <div className="flex justify-between text-[9px] font-mono text-zinc-500">
+                            <span>STOCK STATUS</span>
+                            <span className={isCritical ? "text-rose-400 font-semibold" : "text-zinc-350"}>
+                              {store.current_stock} / {maxStock}
+                            </span>
+                          </div>
+                          <div className="h-1 w-full bg-zinc-900 rounded-full overflow-hidden">
+                            <div 
+                              className={`h-full ${isCritical ? "bg-rose-500/80" : "bg-emerald-500/80"} transition-all duration-300`} 
+                              style={{ width: `${Math.min(100, (store.current_stock / maxStock) * 100)}%` }}
+                            />
+                          </div>
+                        </div>
+
+                        <button 
+                          onClick={() => handleBuyItem(store.name, store.item)}
+                          disabled={store.current_stock <= 0}
+                          className="mt-4 w-full py-1.5 px-3 border border-zinc-805 hover:border-zinc-700 bg-zinc-900/60 hover:bg-zinc-850 text-zinc-200 text-[10px] font-semibold rounded cursor-pointer transition-all disabled:opacity-40 disabled:cursor-not-allowed select-none active:scale-[0.98]"
+                        >
+                          {store.current_stock <= 0 ? "OUT OF STOCK" : "BUY ITEM"}
+                        </button>
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
           </div>
-        </section>
-
-      </main>
+        </main>
+      )}
 
       {/* FOOTER */}
       <footer className="shrink-0 h-8 bg-zinc-950 border-t border-zinc-900 px-6 flex items-center justify-between text-[10px] text-zinc-600 select-none font-mono">
