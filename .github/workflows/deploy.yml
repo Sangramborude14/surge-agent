@@ -25,7 +25,7 @@ jobs:
           python -m pip install --upgrade pip
           # Install backend dependencies (excluding custom SDK from PyPI, using local package setup)
           pip install -e backend/dummy_google_antigravity
-          pip install pymongo fastapi uvicorn python-dotenv pydantic
+          pip install pymongo fastapi uvicorn python-dotenv pydantic cryptography certifi
 
       - name: Lint and Compile Check
         run: |
