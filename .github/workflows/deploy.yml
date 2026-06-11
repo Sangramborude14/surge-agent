@@ -49,7 +49,7 @@ jobs:
 
       - name: Install Node Modules
         working-directory: ./frontend
-        run: npm ci
+        run: npm install
 
       - name: Verify Build
         working-directory: ./frontend
