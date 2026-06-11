@@ -103,7 +103,21 @@ def init_db():
     db.user_profiles_and_sentiment.create_index([("userId", 1)], unique=True)
     db.user_profiles_and_sentiment.create_index([("location", "2dsphere")])
     
-    print("Database initialized successfully with Time Series, 2dsphere indexes, and rollup constraints.")
+    # 11. NEX-RMN google_shopping_products Indexes
+    db.google_shopping_products.create_index([("tenantId", 1)])
+    db.google_shopping_products.create_index([("zoneId", 1)])
+    db.google_shopping_products.create_index([("googleMerchantFields.g_mpn", 1)], unique=True)
+    
+    # 12. NEX-RMN google_ads_campaigns Indexes
+    db.google_ads_campaigns.create_index([("campaignId", 1)], unique=True)
+    db.google_ads_campaigns.create_index([("tenantId", 1)])
+    db.google_ads_campaigns.create_index([("targetingCriteria.targetZones", 1)])
+    
+    # 13. NEX-RMN rmn_asynchronous_events Indexes
+    db.rmn_asynchronous_events.create_index([("timestamp", 1)])
+    db.rmn_asynchronous_events.create_index([("batchId", 1)])
+    
+    print("Database initialized successfully with Time Series, 2dsphere indexes, RMN collections, and rollup constraints.")
 
 
 if __name__ == "__main__":

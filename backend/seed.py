@@ -21,7 +21,12 @@ def seed_data():
     raw_db.co_opetition_campaigns.delete_many({})
     raw_db.user_profiles_and_sentiment.delete_many({})
     
-    print("Cleared all database collections (NORSG-2.0 & legacy baseline).")
+    # Clear NEX-RMN collections
+    raw_db.google_shopping_products.delete_many({})
+    raw_db.google_ads_campaigns.delete_many({})
+    raw_db.rmn_asynchronous_events.delete_many({})
+    
+    print("Cleared all database collections (NORSG-2.0, RMN & legacy baseline).")
 
     # 3. Seed GeoJSON Zones
     # Zone A (West Wing) Polygon
@@ -463,6 +468,234 @@ def seed_data():
     ]
     db.past_campaigns.insert_many(campaigns)
     print("Successfully seeded past campaigns for vector searches.")
+
+    # 7. Seed NEX-RMN google_shopping_products
+    shopping_products = [
+        {
+            "tenantId": "nike_official",
+            "zoneId": "Zone_A",
+            "googleMerchantFields": {
+                "title": "USA 2026 Match Jersey",
+                "description": "Official breathable national team kit",
+                "g_mpn": "US-JER-2026",
+                "base_price": 120.00,
+                "sale_price": 120.00
+            },
+            "inventory_metrics": {
+                "availableStock": 150,
+                "allocatedInCarts": 0,
+                "safetyBuffer": 20
+            },
+            "realtime_demand": {
+                "searchVelocity30s": 0,
+                "cartAdditions30s": 0
+            }
+        },
+        {
+            "tenantId": "nike_official",
+            "zoneId": "Zone_A",
+            "googleMerchantFields": {
+                "title": "Rain Poncho Premium",
+                "description": "Full coverage water resistant match day poncho",
+                "g_mpn": "US-PONCHO-01",
+                "base_price": 45.00,
+                "sale_price": 45.00
+            },
+            "inventory_metrics": {
+                "availableStock": 500,
+                "allocatedInCarts": 0,
+                "safetyBuffer": 20
+            },
+            "realtime_demand": {
+                "searchVelocity30s": 0,
+                "cartAdditions30s": 0
+            }
+        },
+        {
+            "tenantId": "starbucks_official",
+            "zoneId": "Zone_B",
+            "googleMerchantFields": {
+                "title": "Starbucks Reserve Cold Brew",
+                "description": "Nitro cold brew iced coffee cup",
+                "g_mpn": "SBX-COLDBREW",
+                "base_price": 7.50,
+                "sale_price": 7.50
+            },
+            "inventory_metrics": {
+                "availableStock": 8,  # 3 units above safety buffer (5)
+                "allocatedInCarts": 0,
+                "safetyBuffer": 5
+            },
+            "realtime_demand": {
+                "searchVelocity30s": 0,
+                "cartAdditions30s": 0
+            }
+        },
+        {
+            "tenantId": "redbull_official",
+            "zoneId": "Zone_B",
+            "googleMerchantFields": {
+                "title": "Red Bull Energy Can",
+                "description": "Ice cold classic Red Bull 12oz",
+                "g_mpn": "RED-BULL-01",
+                "base_price": 4.50,
+                "sale_price": 4.50
+            },
+            "inventory_metrics": {
+                "availableStock": 100,
+                "allocatedInCarts": 0,
+                "safetyBuffer": 10
+            },
+            "realtime_demand": {
+                "searchVelocity30s": 0,
+                "cartAdditions30s": 0
+            }
+        },
+        {
+            "tenantId": "fifa_souvenirs",
+            "zoneId": "Zone_A",
+            "googleMerchantFields": {
+                "title": "FIFA Mascot Plush Toy",
+                "description": "Official 2026 mascot collectible plush",
+                "g_mpn": "FIFA-MASCOT",
+                "base_price": 25.00,
+                "sale_price": 25.00
+            },
+            "inventory_metrics": {
+                "availableStock": 80,
+                "allocatedInCarts": 0,
+                "safetyBuffer": 10
+            },
+            "realtime_demand": {
+                "searchVelocity30s": 0,
+                "cartAdditions30s": 0
+            }
+        }
+    ]
+    raw_db.google_shopping_products.insert_many(shopping_products)
+    print("Successfully seeded google_shopping_products.")
+
+    # 8. Seed NEX-RMN google_ads_campaigns
+    ads_campaigns = [
+        {
+            "campaignId": "camp_nike_poncho",
+            "tenantId": "nike_official",
+            "biddingStrategy": "Target_ROAS",
+            "maxBidPerClick": 1.80,
+            "dailyBudget": 500.00,
+            "remainingBudget": 450.00,
+            "status": "ELIGIBLE",
+            "targetingCriteria": {
+                "targetZones": ["Zone_A"],
+                "audienceContextVectors": ["excited", "rain poncho", "rainy weather", "looking for team gear"]
+            },
+            "creativeAsset": {
+                "headline": "Stay Dry, Cheer Loud!",
+                "body": "Grab your official USA Rain Poncho in Zone A."
+            },
+            "impressions": 0,
+            "clicks": 0
+        },
+        {
+            "campaignId": "camp_nike_jersey",
+            "tenantId": "nike_official",
+            "biddingStrategy": "Target_ROAS",
+            "maxBidPerClick": 1.50,
+            "dailyBudget": 1000.00,
+            "remainingBudget": 845.50,
+            "status": "ELIGIBLE",
+            "targetingCriteria": {
+                "targetZones": ["Zone_A"],
+                "audienceContextVectors": ["excited", "match jersey", "athletics", "team gear"]
+            },
+            "creativeAsset": {
+                "headline": "Celebrate the Win in Style!",
+                "body": "Get your official match kit now. Instant pick-up in Zone A."
+            },
+            "impressions": 0,
+            "clicks": 0
+        },
+        {
+            "campaignId": "camp_starbucks_coldbrew",
+            "tenantId": "starbucks_official",
+            "biddingStrategy": "Target_ROAS",
+            "maxBidPerClick": 1.20,
+            "dailyBudget": 400.00,
+            "remainingBudget": 320.00,
+            "status": "ELIGIBLE",
+            "targetingCriteria": {
+                "targetZones": ["Zone_B"],
+                "audienceContextVectors": ["exhausted", "hot weather", "cold brew coffee", "tired"]
+            },
+            "creativeAsset": {
+                "headline": "Chill Out with Cold Brew",
+                "body": "Cool down instantly in Zone B. 3 units above buffer left!"
+            },
+            "impressions": 0,
+            "clicks": 0
+        },
+        {
+            "campaignId": "camp_redbull_energy",
+            "tenantId": "redbull_official",
+            "biddingStrategy": "Target_ROAS",
+            "maxBidPerClick": 1.60,
+            "dailyBudget": 600.00,
+            "remainingBudget": 510.00,
+            "status": "ELIGIBLE",
+            "targetingCriteria": {
+                "targetZones": ["Zone_B"],
+                "audienceContextVectors": ["exhausted", "need energy", "active", "hot weather"]
+            },
+            "creativeAsset": {
+                "headline": "Gives You Wings!",
+                "body": "Re-energize with ice-cold Red Bull in Zone B now."
+            },
+            "impressions": 0,
+            "clicks": 0
+        },
+        {
+            "campaignId": "camp_fifa_mascot",
+            "tenantId": "fifa_souvenirs",
+            "biddingStrategy": "Target_ROAS",
+            "maxBidPerClick": 1.00,
+            "dailyBudget": 300.00,
+            "remainingBudget": 240.00,
+            "status": "ELIGIBLE",
+            "targetingCriteria": {
+                "targetZones": ["Zone_A"],
+                "audienceContextVectors": ["kids", "toy", "mascot", "fun"]
+            },
+            "creativeAsset": {
+                "headline": "Take the Mascot Home!",
+                "body": "Official 2026 World Cup Mascot plush toys in Zone A."
+            },
+            "impressions": 0,
+            "clicks": 0
+        },
+        {
+            "campaignId": "camp_coop_starbucks_redbull",
+            "tenantId": "coop_partnership",
+            "isJoint": True,
+            "partnerTenants": ["starbucks_official", "redbull_official"],
+            "biddingStrategy": "Target_ROAS",
+            "maxBidPerClick": 2.00,
+            "dailyBudget": 800.00,
+            "remainingBudget": 700.00,
+            "status": "ELIGIBLE",
+            "targetingCriteria": {
+                "targetZones": ["Zone_B"],
+                "audienceContextVectors": ["exhausted", "cold brew", "energy can", "need energy"]
+            },
+            "creativeAsset": {
+                "headline": "Double the Energy Bundle!",
+                "body": "Grab a Starbucks Reserve Cold Brew & Red Bull Can deal in Zone B!"
+            },
+            "impressions": 0,
+            "clicks": 0
+        }
+    ]
+    raw_db.google_ads_campaigns.insert_many(ads_campaigns)
+    print("Successfully seeded google_ads_campaigns.")
 
 if __name__ == "__main__":
     seed_data()

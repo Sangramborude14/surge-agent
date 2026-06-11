@@ -204,13 +204,49 @@ export default function Home() {
   const [systemTime, setSystemTime] = useState<string>("");
 
   // New Tab & Simulator States
-  const [activeTab, setActiveTab] = useState<'operations' | 'shopping'>('operations');
+  const [activeTab, setActiveTab] = useState<'operations' | 'shopping' | 'merchant'>('operations');
   const [searchZoneA, setSearchZoneA] = useState<string>("");
   const [searchZoneB, setSearchZoneB] = useState<string>("");
+  const [searchFilterA, setSearchFilterA] = useState<string>("");
+  const [searchFilterB, setSearchFilterB] = useState<string>("");
+  const [rmnProductsA, setRmnProductsA] = useState<any[]>([]);
+  const [rmnProductsB, setRmnProductsB] = useState<any[]>([]);
+  const [rmnSponsoredA, setRmnSponsoredA] = useState<any>(null);
+  const [rmnSponsoredB, setRmnSponsoredB] = useState<any>(null);
   const [sentimentResultA, setSentimentResultA] = useState<any>(null);
   const [sentimentResultB, setSentimentResultB] = useState<any>(null);
   const [isSearchingA, setIsSearchingA] = useState<boolean>(false);
   const [isSearchingB, setIsSearchingB] = useState<boolean>(false);
+
+  // Advanced NEX-RMN state hooks
+  const [rmnLedgerA, setRmnLedgerA] = useState<any[]>([]);
+  const [rmnLedgerB, setRmnLedgerB] = useState<any[]>([]);
+  const [rmnMultiplierA, setRmnMultiplierA] = useState<number>(1.0);
+  const [rmnMultiplierB, setRmnMultiplierB] = useState<number>(1.0);
+  const [rmnVisitorsA, setRmnVisitorsA] = useState<number>(0);
+  const [rmnVisitorsB, setRmnVisitorsB] = useState<number>(0);
+
+  // Merchant Portal states
+  const [merchantTenant, setMerchantTenant] = useState<string>("nike_official");
+  const [merchantCampaigns, setMerchantCampaigns] = useState<any[]>([]);
+  const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null);
+  const [editMaxBid, setEditMaxBid] = useState<number>(0);
+  const [editDailyBudget, setEditDailyBudget] = useState<number>(0);
+  const [editHeadline, setEditHeadline] = useState<string>("");
+  const [editBody, setEditBody] = useState<string>("");
+  const [editStatus, setEditStatus] = useState<string>("ELIGIBLE");
+  const [editZones, setEditZones] = useState<string>("");
+  const [editKeywords, setEditKeywords] = useState<string>("");
+
+  // Joint Campaign Creation states
+  const [jointCampaignId, setJointCampaignId] = useState<string>("");
+  const [jointPartners, setJointPartners] = useState<string[]>([]);
+  const [jointMaxBid, setJointMaxBid] = useState<number>(1.5);
+  const [jointDailyBudget, setJointDailyBudget] = useState<number>(500);
+  const [jointHeadline, setJointHeadline] = useState<string>("");
+  const [jointBody, setJointBody] = useState<string>("");
+  const [jointZones, setJointZones] = useState<string>("Zone_A");
+  const [jointKeywords, setJointKeywords] = useState<string>("");
 
   const terminalEndRef = useRef<HTMLDivElement>(null);
 
@@ -290,6 +326,79 @@ export default function Home() {
       clearInterval(interval);
     };
   }, [tick]);
+
+  // NEX-RMN Sync Loop
+  useEffect(() => {
+    if (activeTab !== 'shopping' || !backendOnline) return;
+
+    let active = true;
+    async function syncRmnData() {
+      try {
+        const queryA = searchFilterA;
+        const queryB = searchFilterB;
+        
+        const resA = await fetch(`${API_BASE}/api/rmn/products?zoneId=Zone_A&query=${encodeURIComponent(queryA)}`);
+        const dataA = resA.ok ? await resA.json() : null;
+        
+        const resB = await fetch(`${API_BASE}/api/rmn/products?zoneId=Zone_B&query=${encodeURIComponent(queryB)}`);
+        const dataB = resB.ok ? await resB.json() : null;
+        
+        if (active) {
+          if (dataA) {
+            setRmnProductsA(dataA.products || []);
+            setRmnSponsoredA(dataA.sponsored || null);
+            setRmnLedgerA(dataA.ledger || []);
+            setRmnMultiplierA(dataA.trafficMultiplier || 1.0);
+            setRmnVisitorsA(dataA.zoneVisitors || 0);
+          }
+          if (dataB) {
+            setRmnProductsB(dataB.products || []);
+            setRmnSponsoredB(dataB.sponsored || null);
+            setRmnLedgerB(dataB.ledger || []);
+            setRmnMultiplierB(dataB.trafficMultiplier || 1.0);
+            setRmnVisitorsB(dataB.zoneVisitors || 0);
+          }
+          if (dataA?.logs) {
+            setLogs(dataA.logs);
+          }
+        }
+      } catch (err) {
+        console.error("RMN sync failed:", err);
+      }
+    }
+
+    syncRmnData();
+    const interval = setInterval(syncRmnData, 2000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [activeTab, searchFilterA, searchFilterB, backendOnline]);
+
+  // Merchant Campaigns Sync Loop
+  useEffect(() => {
+    if (activeTab !== 'merchant' || !backendOnline) return;
+
+    let active = true;
+    const fetchCampaigns = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/rmn/campaigns?tenantId=${merchantTenant}`);
+        if (res.ok && active) {
+          const data = await res.json();
+          setMerchantCampaigns(data);
+        }
+      } catch (err) {
+        console.error("Failed to sync merchant campaigns:", err);
+      }
+    };
+
+    fetchCampaigns();
+    const interval = setInterval(fetchCampaigns, 2000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [activeTab, merchantTenant, backendOnline]);
 
   // Trigger surge simulation
   const handleSimulateSurge = async (zone: "A" | "B") => {
@@ -570,6 +679,251 @@ export default function Home() {
     }
   };
 
+  const fetchRmnZoneData = async (zone: "Zone_A" | "Zone_B", query = "") => {
+    try {
+      const response = await fetch(`${API_BASE}/api/rmn/products?zoneId=${zone}&query=${encodeURIComponent(query)}`);
+      if (response.ok) {
+        const data = await response.json();
+        if (zone === "Zone_A") {
+          setRmnProductsA(data.products || []);
+          setRmnSponsoredA(data.sponsored || null);
+        } else {
+          setRmnProductsB(data.products || []);
+          setRmnSponsoredB(data.sponsored || null);
+        }
+        if (data.logs) {
+          setLogs(data.logs);
+        }
+      }
+    } catch (err) {
+      console.error(`Error fetching RMN products for ${zone}:`, err);
+    }
+  };
+
+  const handleRmnSearch = async (zone: "Zone_A" | "Zone_B") => {
+    const query = zone === "Zone_A" ? searchZoneA : searchZoneB;
+    if (zone === "Zone_A") {
+      setSearchFilterA(query);
+    } else {
+      setSearchFilterB(query);
+    }
+    
+    const lowerQuery = query.toLowerCase();
+    let mpn = "";
+    if (lowerQuery.includes("poncho")) {
+      mpn = "US-PONCHO-01";
+    } else if (lowerQuery.includes("jersey")) {
+      mpn = "US-JER-2026";
+    } else if (lowerQuery.includes("mascot") || lowerQuery.includes("toy") || lowerQuery.includes("plush")) {
+      mpn = "FIFA-MASCOT";
+    } else if (lowerQuery.includes("brew") || lowerQuery.includes("coffee") || lowerQuery.includes("cold")) {
+      mpn = "SBX-COLDBREW";
+    } else if (lowerQuery.includes("red") || lowerQuery.includes("bull") || lowerQuery.includes("energy")) {
+      mpn = "RED-BULL-01";
+    }
+    
+    if (mpn) {
+      try {
+        await fetch(`${API_BASE}/api/rmn/event`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "search",
+            zoneId: zone,
+            targetItemMpn: mpn,
+            weight: 10
+          })
+        });
+        
+        await fetch(`${API_BASE}/api/rmn/flush`, { method: "POST" });
+      } catch (err) {
+        console.error("Error logging search event:", err);
+      }
+    }
+    
+    await fetchRmnZoneData(zone, query);
+  };
+
+  const handleRmnBuy = async (zone: "Zone_A" | "Zone_B", mpn: string) => {
+    if (backendOnline) {
+      try {
+        const response = await fetch(`${API_BASE}/api/rmn/purchase`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            zoneId: zone,
+            targetItemMpn: mpn,
+            quantity: 1
+          })
+        });
+        if (response.ok) {
+          const res = await response.json();
+          await fetch(`${API_BASE}/api/rmn/flush`, { method: "POST" });
+          
+          await fetchRmnZoneData("Zone_A", searchFilterA);
+          await fetchRmnZoneData("Zone_B", searchFilterB);
+          
+          const msg = `[RMN Purchase] Bought item with MPN '${mpn}' in '${zone}'. Dynamic stock updated.`;
+          setLogs(prev => [...prev, { timestamp: new Date().toISOString(), message: msg }]);
+        } else {
+          const errData = await response.json();
+          alert(`Purchase failed: ${errData.detail}`);
+        }
+      } catch (err: any) {
+        console.error("RMN Purchase error:", err);
+      }
+    } else {
+      alert("Offline demo mode for RMN requires active API connection.");
+    }
+  };
+
+  const handleRmnClick = async (campaignId: string) => {
+    if (backendOnline) {
+      try {
+        const response = await fetch(`${API_BASE}/api/rmn/click`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ campaignId })
+        });
+        if (response.ok) {
+          const msg = `[RMN Click] Programmatic click registered for campaign '${campaignId}'`;
+          setLogs(prev => [...prev, { timestamp: new Date().toISOString(), message: msg }]);
+        }
+      } catch (err) {
+        console.error("Failed to register RMN click:", err);
+      }
+    }
+  };
+
+  const startEditingCampaign = (camp: any) => {
+    setEditingCampaignId(camp.campaignId);
+    setEditMaxBid(camp.maxBidPerClick);
+    setEditDailyBudget(camp.dailyBudget);
+    setEditHeadline(camp.creativeAsset.headline);
+    setEditBody(camp.creativeAsset.body);
+    setEditStatus(camp.status || "ELIGIBLE");
+    setEditZones((camp.targetingCriteria.targetZones || []).join(", "));
+    setEditKeywords((camp.targetingCriteria.audienceContextVectors || []).join(", "));
+  };
+
+  const handleCampaignUpdate = async (campaignId: string) => {
+    if (backendOnline) {
+      try {
+        const payload = {
+          campaignId,
+          maxBidPerClick: editMaxBid,
+          dailyBudget: editDailyBudget,
+          targetingCriteria: {
+            targetZones: editZones.split(",").map(z => z.trim()),
+            audienceContextVectors: editKeywords.split(",").map(k => k.trim())
+          },
+          creativeAsset: {
+            headline: editHeadline,
+            body: editBody
+          },
+          status: editStatus
+        };
+        const response = await fetch(`${API_BASE}/api/rmn/campaigns/update`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (response.ok) {
+          setEditingCampaignId(null);
+          const msg = `[RMN Merchant] Campaign '${campaignId}' parameters updated successfully.`;
+          setLogs(prev => [...prev, { timestamp: new Date().toISOString(), message: msg }]);
+          // Refresh
+          const res = await fetch(`${API_BASE}/api/rmn/campaigns?tenantId=${merchantTenant}`);
+          if (res.ok) {
+            const data = await res.json();
+            setMerchantCampaigns(data);
+          }
+        } else {
+          const errData = await response.json();
+          alert(`Failed to update campaign: ${errData.detail}`);
+        }
+      } catch (err) {
+        console.error("Failed to update campaign:", err);
+      }
+    }
+  };
+
+  const handleCreateJointCampaign = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!jointCampaignId || jointPartners.length < 2 || !jointHeadline || !jointBody) {
+      alert("Please fill in all joint campaign fields and select at least 2 partner tenants.");
+      return;
+    }
+    if (backendOnline) {
+      try {
+        const payload = {
+          campaignId: jointCampaignId,
+          partnerTenants: jointPartners,
+          maxBidPerClick: jointMaxBid,
+          dailyBudget: jointDailyBudget,
+          targetingCriteria: {
+            targetZones: jointZones.split(",").map(z => z.trim()),
+            audienceContextVectors: jointKeywords.split(",").map(k => k.trim())
+          },
+          creativeAsset: {
+            headline: jointHeadline,
+            body: jointBody
+          }
+        };
+        const response = await fetch(`${API_BASE}/api/rmn/campaigns/create-joint`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (response.ok) {
+          setJointCampaignId("");
+          setJointHeadline("");
+          setJointBody("");
+          setJointKeywords("");
+          setJointPartners([]);
+          const msg = `[RMN Merchant] Joint Co-Opetition campaign '${payload.campaignId}' created successfully between ${payload.partnerTenants.join(" & ")}.`;
+          setLogs(prev => [...prev, { timestamp: new Date().toISOString(), message: msg }]);
+          // Refresh
+          const res = await fetch(`${API_BASE}/api/rmn/campaigns?tenantId=${merchantTenant}`);
+          if (res.ok) {
+            const data = await res.json();
+            setMerchantCampaigns(data);
+          }
+        } else {
+          const errData = await response.json();
+          alert(`Failed to create joint campaign: ${errData.detail}`);
+        }
+      } catch (err) {
+        console.error("Failed to create joint campaign:", err);
+      }
+    }
+  };
+
+  const handleRmnSimulateTraffic = async (zoneId: string, count: number) => {
+    if (backendOnline) {
+      try {
+        const response = await fetch(`${API_BASE}/api/rmn/simulate-traffic`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ zoneId, count })
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (zoneId.toLowerCase() === "zone_a") {
+            setRmnVisitorsA(data.visitorCount);
+          } else {
+            setRmnVisitorsB(data.visitorCount);
+          }
+          // Immediately refresh products/auction
+          await fetchRmnZoneData("Zone_A", searchFilterA);
+          await fetchRmnZoneData("Zone_B", searchFilterB);
+        }
+      } catch (err) {
+        console.error("Failed to simulate traffic:", err);
+      }
+    }
+  };
+
   const handleBuyItem = async (storeName: string, itemName: string) => {
     if (backendOnline) {
       try {
@@ -774,6 +1128,16 @@ export default function Home() {
           >
             Shopping Simulator
           </button>
+          <button 
+            onClick={() => setActiveTab('merchant')}
+            className={`px-4 py-1.5 rounded-sm text-xs font-semibold uppercase tracking-wider transition-all cursor-pointer select-none ${
+              activeTab === 'merchant' 
+                ? "bg-zinc-900/80 text-emerald-400 font-bold border border-zinc-800/40 shadow-sm" 
+                : "text-zinc-500 hover:text-zinc-400"
+            }`}
+          >
+            Merchant Portal
+          </button>
         </div>
 
         <div className="flex items-center space-x-3 font-mono text-[11px]">
@@ -793,7 +1157,7 @@ export default function Home() {
       </header>
 
       {/* DASHBOARD GRID */}
-      {activeTab === 'operations' ? (
+      {activeTab === 'operations' && (
         <main className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-5 p-5 overflow-hidden">
           
           {/* LEFT COLUMN: MALL MAP & CONTROLS */}
@@ -1104,21 +1468,23 @@ export default function Home() {
           </section>
 
         </main>
-      ) : (
+      )}
+
+      {activeTab === 'shopping' && (
         <main className="flex-1 flex flex-col p-5 overflow-y-auto space-y-5">
           {/* Main Simulator Header */}
           <div className="shrink-0 flex items-center justify-between border-b border-zinc-900 pb-3">
             <div>
               <h2 className="text-sm font-bold uppercase tracking-wider text-zinc-300">
-                User Simulator Shopping Deck
+                Nexus Retail Media Network Exchange Simulator (NEX-RMN)
               </h2>
               <p className="text-[10px] text-zinc-500 font-mono mt-0.5">
-                Simulate consumer experience, browse real-time inventory, search by sentiment mood, and trigger transaction purchases.
+                Simulate consumer experience across Zone A and Zone B. Search logs trigger yield adjustments, and purchases run ACID inventory transactions.
               </p>
             </div>
             {backendOnline && (
               <span className="text-[10px] font-mono text-emerald-400 bg-zinc-900/40 px-2 py-0.5 rounded border border-emerald-950/20">
-                LIVE DB TRANSACTIONS ACTIVE
+                LIVE DB RTB AUCTION & ASYNC LOOP ACTIVE
               </span>
             )}
           </div>
@@ -1126,14 +1492,36 @@ export default function Home() {
           <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-6 min-h-[500px]">
             {/* COLUMN 1: ZONE A SHOPPING (WEST WING) */}
             <div className="flex flex-col border border-zinc-900 bg-zinc-900/10 rounded-lg p-5 space-y-4">
-              <div className="flex items-center justify-between border-b border-zinc-900 pb-2">
+              <div className="flex items-center justify-between border-b border-zinc-900 pb-2 flex-wrap gap-2">
                 <div className="flex items-center space-x-2">
                   <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
                   <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-200">
                     Zone A Shopping // West Wing
                   </h3>
                 </div>
-                <span className="text-[9px] font-mono text-zinc-500">COORDINATES: [121.501, 31.240]</span>
+                
+                {/* Traffic Density Controller */}
+                <div className="flex items-center space-x-2 text-[10px] bg-zinc-950/60 border border-zinc-900 rounded px-2 py-1">
+                  <span className="font-mono text-zinc-400">Visitors:</span>
+                  <button
+                    onClick={() => handleRmnSimulateTraffic("Zone_A", Math.max(0, rmnVisitorsA - 1))}
+                    className="w-4 h-4 flex items-center justify-center border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 rounded cursor-pointer select-none"
+                  >
+                    -
+                  </button>
+                  <span className="w-4 text-center font-bold text-zinc-200 font-mono">{rmnVisitorsA}</span>
+                  <button
+                    onClick={() => handleRmnSimulateTraffic("Zone_A", rmnVisitorsA + 1)}
+                    className="w-4 h-4 flex items-center justify-center border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 rounded cursor-pointer select-none"
+                  >
+                    +
+                  </button>
+                  {rmnVisitorsA >= 5 && (
+                    <span className="animate-pulse bg-amber-500/10 text-amber-400 border border-amber-800/30 px-1 py-0.5 rounded text-[8px] font-extrabold tracking-wider font-mono">
+                      🔥 SURGE (1.5x)
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* Search input Zone A */}
@@ -1141,15 +1529,15 @@ export default function Home() {
                 <div className="relative flex-1">
                   <input 
                     type="text" 
-                    placeholder="Search Zone A or type mood (e.g. 'hot and tired')" 
+                    placeholder="Search Zone A (e.g. 'Rain Poncho' or 'Match Jersey')" 
                     value={searchZoneA}
                     onChange={e => setSearchZoneA(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && handleSearchSentiment("A")}
+                    onKeyDown={e => e.key === 'Enter' && handleRmnSearch("Zone_A")}
                     className="w-full px-3 py-2 text-xs rounded bg-zinc-950/70 border border-zinc-850 focus:outline-none focus:border-zinc-750 text-zinc-300 placeholder:text-zinc-650"
                   />
                   {searchZoneA && (
                     <button 
-                      onClick={() => { setSearchZoneA(""); setSentimentResultA(null); }}
+                      onClick={() => { setSearchZoneA(""); setSearchFilterA(""); }}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-zinc-500 hover:text-zinc-300 cursor-pointer"
                     >
                       Clear
@@ -1157,23 +1545,74 @@ export default function Home() {
                   )}
                 </div>
                 <button 
-                  onClick={() => handleSearchSentiment("A")}
-                  disabled={isSearchingA || !searchZoneA.trim()}
-                  className="px-4 py-2 border border-zinc-800 bg-zinc-900/60 hover:bg-zinc-800/80 text-zinc-205 text-xs font-semibold rounded cursor-pointer transition-all disabled:opacity-40 disabled:cursor-not-allowed select-none active:scale-[0.98]"
+                  onClick={() => handleRmnSearch("Zone_A")}
+                  className="px-4 py-2 border border-zinc-800 bg-zinc-900/60 hover:bg-zinc-800/80 text-zinc-205 text-xs font-semibold rounded cursor-pointer transition-all active:scale-[0.98]"
                 >
-                  {isSearchingA ? "Analyzing..." : "Search"}
+                  Search
                 </button>
               </div>
 
-              {/* Empathetic copy banner Zone A */}
-              {sentimentResultA && (
-                <div className="bg-purple-950/15 border border-purple-800/30 rounded p-3 text-[11px] text-purple-300 leading-relaxed shadow-sm relative overflow-hidden animate-[fadeIn_0.3s_ease]">
-                  <div className="absolute top-0 left-0 bottom-0 w-[3px] bg-purple-500" />
-                  <div className="font-bold text-[10px] uppercase tracking-wider text-purple-400 font-mono mb-1">Empathetic Target Campaign Offer</div>
-                  "{sentimentResultA.empatheticMessage}"
-                  {sentimentResultA.offer && (
-                    <div className="mt-1.5 text-[10px] font-bold text-zinc-400">
-                      Matched Offer: {sentimentResultA.offer.title} (+15% Sentiment Boost applied to category)
+              {/* Sponsored Card Zone A */}
+              {rmnSponsoredA && (
+                <div 
+                  onClick={() => handleRmnClick(rmnSponsoredA.campaignId)}
+                  className={`relative border-2 rounded-lg p-4 shadow-lg overflow-hidden backdrop-blur-md cursor-pointer transition-all ${
+                    rmnSponsoredA.tenantId === "coop_partnership"
+                      ? "border-violet-500/40 bg-zinc-950/65 hover:border-violet-400"
+                      : "border-indigo-500/40 bg-zinc-950/65 hover:border-indigo-400"
+                  }`}
+                >
+                  <div className="absolute -right-10 -top-10 w-24 h-24 rounded-full bg-violet-650/10 blur-xl pointer-events-none" />
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="bg-gradient-to-r from-violet-500 to-indigo-500 text-white text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded tracking-wider shadow-sm font-mono">
+                      {rmnSponsoredA.tenantId === "coop_partnership" ? "★ CO-OP PARTNERSHIP // AD WINNER" : "★ Sponsored // Ad Auction Winner"}
+                    </span>
+                    <span className="text-[8px] text-zinc-500 font-mono">
+                      CPC: ${rmnSponsoredA.actual_cpc.toFixed(2)} | Ad Rank: {rmnSponsoredA.ad_rank.toFixed(1)}
+                    </span>
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="text-xs font-bold text-violet-300 leading-snug">
+                      {rmnSponsoredA.headline}
+                    </h4>
+                    <p className="text-[10px] text-zinc-400 leading-normal">
+                      {rmnSponsoredA.body}
+                    </p>
+                  </div>
+                  {rmnSponsoredA.product && (
+                    <div className="mt-3 bg-zinc-900/40 border border-zinc-800/40 rounded p-2.5 flex items-center justify-between">
+                      <div>
+                        <div className="text-[9px] uppercase tracking-wider text-zinc-555 font-mono">
+                          {rmnSponsoredA.tenantId === "coop_partnership" 
+                            ? "JOINT DEAL"
+                            : rmnSponsoredA.product.tenantId.replace('_official', '').toUpperCase()
+                          }
+                        </div>
+                        <div className="text-xs font-bold text-zinc-200 mt-0.5">
+                          {rmnSponsoredA.product.googleMerchantFields.title}
+                        </div>
+                        <div className="mt-1 flex items-baseline space-x-1.5">
+                          <span className="text-xs font-extrabold text-white">
+                            ${rmnSponsoredA.product.googleMerchantFields.sale_price.toFixed(2)}
+                          </span>
+                          {rmnSponsoredA.product.googleMerchantFields.sale_price < rmnSponsoredA.product.googleMerchantFields.base_price && (
+                            <span className="text-[9px] text-zinc-650 line-through">
+                              ${rmnSponsoredA.product.googleMerchantFields.base_price.toFixed(2)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation(); // prevent double click firing of card onClick
+                          handleRmnClick(rmnSponsoredA.campaignId);
+                          handleRmnBuy("Zone_A", rmnSponsoredA.product.googleMerchantFields.g_mpn);
+                        }}
+                        disabled={rmnSponsoredA.product.inventory_metrics.availableStock <= 0}
+                        className="shrink-0 py-1 px-3 border border-violet-650 hover:border-violet-500 bg-violet-600/10 hover:bg-violet-600/25 text-violet-300 text-[10px] font-bold rounded cursor-pointer transition-all disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98]"
+                      >
+                        {rmnSponsoredA.product.inventory_metrics.availableStock <= 0 ? "OUT OF STOCK" : "BUY OFFER"}
+                      </button>
                     </div>
                   )}
                 </div>
@@ -1181,124 +1620,204 @@ export default function Home() {
 
               {/* Shopping Cards Zone A */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {(stores.length > 0 ? stores : INITIAL_MOCK_STORES)
-                  .filter(s => s.name === "World Cup Athletics" || s.name === "Fan Zone Goods")
-                  .filter(s => filterStoreByQuery(s, searchZoneA))
-                  .sort((a, b) => {
-                    if (searchZoneA.trim()) {
-                      return (a.sales ?? 0) - (b.sales ?? 0);
-                    }
-                    return 0;
-                  })
-                  .map(store => {
-                    const discounts = getCalculatedDiscount(store.name, store.item, "A");
-                    const originalPrice = (store.wholesalePrice ?? 20) * 1.5;
-                    const finalPrice = discounts.total > 0 
-                      ? originalPrice * (1 - discounts.total / 100) 
-                      : originalPrice;
-                    const maxStock = store.name.includes("World Cup") ? 150 : store.name.includes("Champions") ? 120 : store.name.includes("Fan") ? 80 : 60;
-                    const isCritical = store.current_stock <= store.target_stock;
-                    
-                    const currentStoresList = stores.length > 0 ? stores : INITIAL_MOCK_STORES;
-                    const siblings = currentStoresList.filter(s => 
-                      (store.category && s.category === store.category) ||
-                      (store.brand && s.brand === store.brand)
-                    );
-                    const isLeastSales = searchZoneA.trim() !== "" && siblings.length > 0 && 
-                      (store.sales ?? 0) === Math.min(...siblings.map(s => s.sales ?? 0));
+                {rmnProductsA
+                  .filter(p => !rmnSponsoredA || p.googleMerchantFields.g_mpn !== rmnSponsoredA.product?.googleMerchantFields.g_mpn)
+                  .map(product => {
+                    const originalPrice = product.googleMerchantFields.base_price;
+                    const salePrice = product.googleMerchantFields.sale_price;
+                    const isDiscounted = salePrice < originalPrice;
+                    const discountPercentage = Math.round(((originalPrice - salePrice) / originalPrice) * 100);
+                    const avail = product.inventory_metrics.availableStock;
+                    const buffer = product.inventory_metrics.safetyBuffer;
+                    const isCritical = avail <= buffer;
+                    const searchVelocity = product.realtime_demand?.searchVelocity30s || 0;
+                    const cartAdditions = product.realtime_demand?.cartAdditions30s || 0;
 
                     return (
                       <div 
-                        key={store.name + "-" + store.item} 
+                        key={product.googleMerchantFields.g_mpn} 
                         className="border border-zinc-900 bg-zinc-950/40 hover:border-zinc-850 p-4 rounded-md transition-all flex flex-col justify-between relative overflow-hidden"
                       >
-                        {isLeastSales && (
-                          <div className="absolute top-2 left-2 bg-amber-500/90 text-zinc-950 text-[8px] font-bold px-1.5 py-0.5 rounded shadow-sm z-10 font-mono uppercase tracking-wider">
-                            📉 Least Sales Focus
-                          </div>
-                        )}
-                        {discounts.total > 0 && (
-                          <div className="absolute top-2 right-2 bg-rose-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm z-10">
-                            {discounts.total}% OFF
+                        {isDiscounted && (
+                          <div className="absolute top-2 right-2 bg-rose-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded shadow-sm z-10 font-mono">
+                            {discountPercentage}% OFF
                           </div>
                         )}
                         
                         <div className="space-y-1">
                           <span className="text-[9px] uppercase tracking-wider text-zinc-555 font-mono">
-                            {store.name} {store.brand && `// ${store.brand.toUpperCase()}`}
+                            {product.tenantId.replace('_official', '').toUpperCase()}
                           </span>
-                          <h4 className="text-xs font-bold text-zinc-200">{store.item}</h4>
+                          <h4 className="text-xs font-bold text-zinc-200">{product.googleMerchantFields.title}</h4>
+                          <p className="text-[9px] text-zinc-500 line-clamp-1">{product.googleMerchantFields.description}</p>
                         </div>
 
-                        <div className="mt-3 flex items-baseline space-x-2">
-                          <span className="text-sm font-extrabold text-white">
-                            ${finalPrice.toFixed(2)}
-                          </span>
-                          {discounts.total > 0 && (
-                            <span className="text-[10px] text-zinc-655 line-through">
-                              ${originalPrice.toFixed(2)}
-                            </span>
-                          )}
-                        </div>
-
-                        {(discounts.keywordBoost > 0 || discounts.sentimentBoost > 0 || discounts.leastSalesBoost > 0) && (
-                          <div className="mt-2 flex flex-col gap-0.5 text-[8px] font-mono">
-                            {discounts.keywordBoost > 0 && (
-                              <span className="text-emerald-400">
-                                +10% Keyword Match Boost
+                        {/* Real-time demand indicators */}
+                        {(searchVelocity > 0 || cartAdditions > 0) && (
+                          <div className="mt-2 flex gap-1.5 text-[8px] font-mono">
+                            {searchVelocity > 0 && (
+                              <span className="text-sky-400 bg-sky-950/30 px-1 py-0.5 rounded border border-sky-950/20">
+                                🔍 Search Vel: {searchVelocity}
                               </span>
                             )}
-                            {discounts.sentimentBoost > 0 && (
-                              <span className="text-purple-400">
-                                +15% Sentiment Target Boost
-                              </span>
-                            )}
-                            {discounts.leastSalesBoost > 0 && (
-                              <span className="text-amber-400">
-                                +15% Least Sales Boost
+                            {cartAdditions > 0 && (
+                              <span className="text-emerald-400 bg-emerald-950/30 px-1 py-0.5 rounded border border-emerald-950/20">
+                                🛒 Cart Adds: {cartAdditions}
                               </span>
                             )}
                           </div>
                         )}
 
+                        <div className="mt-3 flex items-baseline space-x-2">
+                          <span className="text-sm font-extrabold text-white">
+                            ${salePrice.toFixed(2)}
+                          </span>
+                          {isDiscounted && (
+                            <span className="text-[10px] text-zinc-650 line-through">
+                              ${originalPrice.toFixed(2)}
+                            </span>
+                          )}
+                        </div>
+
                         <div className="mt-4 space-y-1">
                           <div className="flex justify-between text-[9px] font-mono text-zinc-500">
                             <span>STOCK STATUS</span>
                             <span className={isCritical ? "text-rose-400 font-semibold" : "text-zinc-350"}>
-                              {store.current_stock} / {maxStock}
+                              {avail} (Buffer: {buffer})
                             </span>
                           </div>
                           <div className="h-1 w-full bg-zinc-900 rounded-full overflow-hidden">
                             <div 
                               className={`h-full ${isCritical ? "bg-rose-500/80" : "bg-emerald-500/80"} transition-all duration-300`} 
-                              style={{ width: `${Math.min(100, (store.current_stock / maxStock) * 100)}%` }}
+                              style={{ width: `${Math.min(100, (avail / (avail + 20)) * 100)}%` }}
                             />
                           </div>
                         </div>
 
                         <button 
-                          onClick={() => handleBuyItem(store.name, store.item)}
-                          disabled={store.current_stock <= 0}
-                          className="mt-4 w-full py-1.5 px-3 border border-zinc-805 hover:border-zinc-700 bg-zinc-900/60 hover:bg-zinc-850 text-zinc-200 text-[10px] font-semibold rounded cursor-pointer transition-all disabled:opacity-40 disabled:cursor-not-allowed select-none active:scale-[0.98]"
+                          onClick={() => handleRmnBuy("Zone_A", product.googleMerchantFields.g_mpn)}
+                          disabled={avail <= 0}
+                          className="mt-4 w-full py-1.5 px-3 border border-zinc-805 hover:border-zinc-700 bg-zinc-900/60 hover:bg-zinc-850 text-zinc-200 text-[10px] font-semibold rounded cursor-pointer transition-all disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98]"
                         >
-                          {store.current_stock <= 0 ? "OUT OF STOCK" : "BUY ITEM"}
+                          {avail <= 0 ? "OUT OF STOCK" : "BUY ITEM / ADD TO CART"}
                         </button>
                       </div>
                     );
                   })}
               </div>
+
+              {/* LIVE AUCTION LEDGER TERMINAL ZONE A */}
+              <div className="border border-zinc-900 bg-black/85 rounded-md overflow-hidden font-mono mt-2">
+                <div className="bg-zinc-900/60 border-b border-zinc-900 px-3 py-2 flex items-center justify-between">
+                  <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider">
+                    ⌨ Zone A programmatic RTB auction ledger
+                  </span>
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                </div>
+                <div className="p-3 text-[10px] text-zinc-300 space-y-2 max-h-[190px] overflow-y-auto leading-relaxed">
+                  {rmnLedgerA.length === 0 ? (
+                    <div className="text-zinc-650 italic">No auctions executed yet. Run a search to trigger.</div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="text-zinc-500 border-b border-zinc-900/50 pb-1 text-[9px]">
+                        Formula: Ad Rank = CPC Bid * QS * Multiplier ({rmnMultiplierA}x)
+                      </div>
+                      {rmnLedgerA.map((cand) => {
+                        const isWinner = cand.status === "WINNER";
+                        const isRunnerUp = cand.status === "RUNNER_UP";
+                        const isDisqualified = (cand.status || "").startsWith("DISQUALIFIED");
+                        
+                        return (
+                          <div key={cand.campaignId} className="flex flex-col border-b border-zinc-900/30 pb-1.5 last:border-0 last:pb-0">
+                            <div className="flex items-center justify-between">
+                              <span className={`${isWinner ? "text-violet-300 font-extrabold" : "text-zinc-455 font-bold"}`}>
+                                {cand.campaignId}
+                              </span>
+                              <span className={`px-1 rounded text-[8px] font-bold tracking-wider ${
+                                isWinner ? "bg-emerald-950/60 text-emerald-400 border border-emerald-800/30" : 
+                                isRunnerUp ? "bg-amber-950/60 text-amber-400 border border-amber-800/30" : 
+                                isDisqualified ? "bg-rose-950/30 text-rose-500/70 border border-rose-900/10" : "bg-zinc-900 text-zinc-400"
+                              }`}>
+                                {cand.status}
+                              </span>
+                            </div>
+                            {!isDisqualified ? (
+                              <div className="text-zinc-400 mt-0.5 text-[9px]">
+                                Bid: <span className="text-zinc-200 font-bold">${cand.maxBidPerClick.toFixed(2)}</span> | 
+                                QS: <span className="text-zinc-200 font-bold">{cand.qs.toFixed(1)}</span> | 
+                                Ad Rank: <span className="text-zinc-200 font-bold">{cand.adRank.toFixed(2)}</span>
+                              </div>
+                            ) : (
+                              <div className="text-rose-500/60 italic mt-0.5 text-[9px]">
+                                Disqualified: {cand.status === "DISQUALIFIED_STOCK_SHORTAGE" ? "Out of Stock (Safety Buffer)" : "No Rank"}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                      
+                      {/* Winner calculations */}
+                      {(() => {
+                        const winner = rmnLedgerA.find(c => c.status === "WINNER");
+                        const runnerUp = rmnLedgerA.find(c => c.status === "RUNNER_UP");
+                        if (winner) {
+                          const billedCpc = rmnSponsoredA ? rmnSponsoredA.actual_cpc : 0.05;
+                          return (
+                            <div className="mt-2 pt-2 border-t border-zinc-800/60 text-[8px] text-zinc-500 space-y-1 bg-zinc-950/30 p-2 rounded">
+                              <div className="text-zinc-400 font-bold uppercase tracking-wider text-[8px]">Programmatic Settlement (Vickrey):</div>
+                              {runnerUp ? (
+                                <div>
+                                  CPC = (Runner Up Ad Rank / (Winner QS * Multiplier)) + $0.01 <br />
+                                  CPC = ({runnerUp.adRank.toFixed(2)} / ({winner.qs.toFixed(1)} * {rmnMultiplierA})) + $0.01 = <span className="text-emerald-400 font-extrabold">${billedCpc.toFixed(2)}</span>
+                                </div>
+                              ) : (
+                                <div>
+                                  CPC = Max Bid or Default Flat Minimum = <span className="text-emerald-400 font-extrabold">${billedCpc.toFixed(2)}</span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
 
             {/* COLUMN 2: ZONE B SHOPPING (EAST WING) */}
             <div className="flex flex-col border border-zinc-900 bg-zinc-900/10 rounded-lg p-5 space-y-4">
-              <div className="flex items-center justify-between border-b border-zinc-900 pb-2">
+              <div className="flex items-center justify-between border-b border-zinc-900 pb-2 flex-wrap gap-2">
                 <div className="flex items-center space-x-2">
                   <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
                   <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-200">
                     Zone B Shopping // East Wing
                   </h3>
                 </div>
-                <span className="text-[9px] font-mono text-zinc-500">COORDINATES: [121.515, 31.245]</span>
+                
+                {/* Traffic Density Controller */}
+                <div className="flex items-center space-x-2 text-[10px] bg-zinc-950/60 border border-zinc-900 rounded px-2 py-1">
+                  <span className="font-mono text-zinc-400">Visitors:</span>
+                  <button
+                    onClick={() => handleRmnSimulateTraffic("Zone_B", Math.max(0, rmnVisitorsB - 1))}
+                    className="w-4 h-4 flex items-center justify-center border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 rounded cursor-pointer select-none"
+                  >
+                    -
+                  </button>
+                  <span className="w-4 text-center font-bold text-zinc-200 font-mono">{rmnVisitorsB}</span>
+                  <button
+                    onClick={() => handleRmnSimulateTraffic("Zone_B", rmnVisitorsB + 1)}
+                    className="w-4 h-4 flex items-center justify-center border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 rounded cursor-pointer select-none"
+                  >
+                    +
+                  </button>
+                  {rmnVisitorsB >= 5 && (
+                    <span className="animate-pulse bg-amber-500/10 text-amber-400 border border-amber-800/30 px-1 py-0.5 rounded text-[8px] font-extrabold tracking-wider font-mono">
+                      🔥 SURGE (1.5x)
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* Search input Zone B */}
@@ -1306,15 +1825,15 @@ export default function Home() {
                 <div className="relative flex-1">
                   <input 
                     type="text" 
-                    placeholder="Search Zone B or type mood (e.g. 'hot and tired')" 
+                    placeholder="Search Zone B (e.g. 'Cold Brew' or 'Red Bull')" 
                     value={searchZoneB}
                     onChange={e => setSearchZoneB(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && handleSearchSentiment("B")}
-                    className="w-full px-3 py-2 text-xs rounded bg-zinc-950/70 border border-zinc-850 focus:outline-none focus:border-zinc-750 text-zinc-300 placeholder:text-zinc-650"
+                    onKeyDown={e => e.key === 'Enter' && handleRmnSearch("Zone_B")}
+                    className="w-full px-3 py-2 text-xs rounded bg-zinc-950/70 border border-zinc-855 focus:outline-none focus:border-zinc-755 text-zinc-300 placeholder:text-zinc-650"
                   />
                   {searchZoneB && (
                     <button 
-                      onClick={() => { setSearchZoneB(""); setSentimentResultB(null); }}
+                      onClick={() => { setSearchZoneB(""); setSearchFilterB(""); }}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-zinc-500 hover:text-zinc-300 cursor-pointer"
                     >
                       Clear
@@ -1322,23 +1841,74 @@ export default function Home() {
                   )}
                 </div>
                 <button 
-                  onClick={() => handleSearchSentiment("B")}
-                  disabled={isSearchingB || !searchZoneB.trim()}
-                  className="px-4 py-2 border border-zinc-800 bg-zinc-900/60 hover:bg-zinc-800/80 text-zinc-205 text-xs font-semibold rounded cursor-pointer transition-all disabled:opacity-40 disabled:cursor-not-allowed select-none active:scale-[0.98]"
+                  onClick={() => handleRmnSearch("Zone_B")}
+                  className="px-4 py-2 border border-zinc-800 bg-zinc-900/60 hover:bg-zinc-850 text-zinc-205 text-xs font-semibold rounded cursor-pointer transition-all active:scale-[0.98]"
                 >
-                  {isSearchingB ? "Analyzing..." : "Search"}
+                  Search
                 </button>
               </div>
 
-              {/* Empathetic copy banner Zone B */}
-              {sentimentResultB && (
-                <div className="bg-purple-950/15 border border-purple-800/30 rounded p-3 text-[11px] text-purple-300 leading-relaxed shadow-sm relative overflow-hidden animate-[fadeIn_0.3s_ease]">
-                  <div className="absolute top-0 left-0 bottom-0 w-[3px] bg-purple-500" />
-                  <div className="font-bold text-[10px] uppercase tracking-wider text-purple-400 font-mono mb-1">Empathetic Target Campaign Offer</div>
-                  "{sentimentResultB.empatheticMessage}"
-                  {sentimentResultB.offer && (
-                    <div className="mt-1.5 text-[10px] font-bold text-zinc-400">
-                      Matched Offer: {sentimentResultB.offer.title} (+15% Sentiment Boost applied to category)
+              {/* Sponsored Card Zone B */}
+              {rmnSponsoredB && (
+                <div 
+                  onClick={() => handleRmnClick(rmnSponsoredB.campaignId)}
+                  className={`relative border-2 rounded-lg p-4 shadow-lg overflow-hidden backdrop-blur-md cursor-pointer transition-all ${
+                    rmnSponsoredB.tenantId === "coop_partnership"
+                      ? "border-violet-500/40 bg-zinc-950/65 hover:border-violet-400"
+                      : "border-indigo-500/40 bg-zinc-950/65 hover:border-indigo-400"
+                  }`}
+                >
+                  <div className="absolute -right-10 -top-10 w-24 h-24 rounded-full bg-violet-650/10 blur-xl pointer-events-none" />
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="bg-gradient-to-r from-violet-500 to-indigo-500 text-white text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded tracking-wider shadow-sm font-mono">
+                      {rmnSponsoredB.tenantId === "coop_partnership" ? "★ CO-OP PARTNERSHIP // AD WINNER" : "★ Sponsored // Ad Auction Winner"}
+                    </span>
+                    <span className="text-[8px] text-zinc-500 font-mono">
+                      CPC: ${rmnSponsoredB.actual_cpc.toFixed(2)} | Ad Rank: {rmnSponsoredB.ad_rank.toFixed(1)}
+                    </span>
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="text-xs font-bold text-violet-300 leading-snug">
+                      {rmnSponsoredB.headline}
+                    </h4>
+                    <p className="text-[10px] text-zinc-400 leading-normal">
+                      {rmnSponsoredB.body}
+                    </p>
+                  </div>
+                  {rmnSponsoredB.product && (
+                    <div className="mt-3 bg-zinc-900/40 border border-zinc-800/40 rounded p-2.5 flex items-center justify-between">
+                      <div>
+                        <div className="text-[9px] uppercase tracking-wider text-zinc-555 font-mono">
+                          {rmnSponsoredB.tenantId === "coop_partnership" 
+                            ? "JOINT DEAL"
+                            : rmnSponsoredB.product.tenantId.replace('_official', '').toUpperCase()
+                          }
+                        </div>
+                        <div className="text-xs font-bold text-zinc-200 mt-0.5">
+                          {rmnSponsoredB.product.googleMerchantFields.title}
+                        </div>
+                        <div className="mt-1 flex items-baseline space-x-1.5">
+                          <span className="text-xs font-extrabold text-white">
+                            ${rmnSponsoredB.product.googleMerchantFields.sale_price.toFixed(2)}
+                          </span>
+                          {rmnSponsoredB.product.googleMerchantFields.sale_price < rmnSponsoredB.product.googleMerchantFields.base_price && (
+                            <span className="text-[9px] text-zinc-650 line-through">
+                              ${rmnSponsoredB.product.googleMerchantFields.base_price.toFixed(2)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation(); // prevent double click firing of card onClick
+                          handleRmnClick(rmnSponsoredB.campaignId);
+                          handleRmnBuy("Zone_B", rmnSponsoredB.product.googleMerchantFields.g_mpn);
+                        }}
+                        disabled={rmnSponsoredB.product.inventory_metrics.availableStock <= 0}
+                        className="shrink-0 py-1 px-3 border border-violet-650 hover:border-violet-500 bg-violet-600/10 hover:bg-violet-600/25 text-violet-300 text-[10px] font-bold rounded cursor-pointer transition-all disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98]"
+                      >
+                        {rmnSponsoredB.product.inventory_metrics.availableStock <= 0 ? "OUT OF STOCK" : "BUY OFFER"}
+                      </button>
                     </div>
                   )}
                 </div>
@@ -1346,116 +1916,581 @@ export default function Home() {
 
               {/* Shopping Cards Zone B */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {(stores.length > 0 ? stores : INITIAL_MOCK_STORES)
-                  .filter(s => s.name === "Champions Souvenirs" || s.name === "Stadium Snacks & Gear")
-                  .filter(s => filterStoreByQuery(s, searchZoneB))
-                  .sort((a, b) => {
-                    if (searchZoneB.trim()) {
-                      return (a.sales ?? 0) - (b.sales ?? 0);
-                    }
-                    return 0;
-                  })
-                  .map(store => {
-                    const discounts = getCalculatedDiscount(store.name, store.item, "B");
-                    const originalPrice = (store.wholesalePrice ?? 20) * 1.5;
-                    const finalPrice = discounts.total > 0 
-                      ? originalPrice * (1 - discounts.total / 100) 
-                      : originalPrice;
-                    const maxStock = store.name.includes("World Cup") ? 150 : store.name.includes("Champions") ? 120 : store.name.includes("Fan") ? 80 : 60;
-                    const isCritical = store.current_stock <= store.target_stock;
-                    
-                    const currentStoresList = stores.length > 0 ? stores : INITIAL_MOCK_STORES;
-                    const siblings = currentStoresList.filter(s => 
-                      (store.category && s.category === store.category) ||
-                      (store.brand && s.brand === store.brand)
-                    );
-                    const isLeastSales = searchZoneB.trim() !== "" && siblings.length > 0 && 
-                      (store.sales ?? 0) === Math.min(...siblings.map(s => s.sales ?? 0));
+                {rmnProductsB
+                  .filter(p => !rmnSponsoredB || p.googleMerchantFields.g_mpn !== rmnSponsoredB.product?.googleMerchantFields.g_mpn)
+                  .map(product => {
+                    const originalPrice = product.googleMerchantFields.base_price;
+                    const salePrice = product.googleMerchantFields.sale_price;
+                    const isDiscounted = salePrice < originalPrice;
+                    const discountPercentage = Math.round(((originalPrice - salePrice) / originalPrice) * 100);
+                    const avail = product.inventory_metrics.availableStock;
+                    const buffer = product.inventory_metrics.safetyBuffer;
+                    const isCritical = avail <= buffer;
+                    const searchVelocity = product.realtime_demand?.searchVelocity30s || 0;
+                    const cartAdditions = product.realtime_demand?.cartAdditions30s || 0;
 
                     return (
                       <div 
-                        key={store.name + "-" + store.item} 
-                        className="border border-zinc-900 bg-zinc-950/40 hover:border-zinc-850 p-4 rounded-md transition-all flex flex-col justify-between relative overflow-hidden"
+                        key={product.googleMerchantFields.g_mpn} 
+                        className="border border-zinc-900 bg-zinc-950/40 hover:border-zinc-855 p-4 rounded-md transition-all flex flex-col justify-between relative overflow-hidden"
                       >
-                        {isLeastSales && (
-                          <div className="absolute top-2 left-2 bg-amber-500/90 text-zinc-950 text-[8px] font-bold px-1.5 py-0.5 rounded shadow-sm z-10 font-mono uppercase tracking-wider">
-                            📉 Least Sales Focus
-                          </div>
-                        )}
-                        {discounts.total > 0 && (
-                          <div className="absolute top-2 right-2 bg-rose-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm z-10">
-                            {discounts.total}% OFF
+                        {isDiscounted && (
+                          <div className="absolute top-2 right-2 bg-rose-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded shadow-sm z-10 font-mono">
+                            {discountPercentage}% OFF
                           </div>
                         )}
                         
                         <div className="space-y-1">
                           <span className="text-[9px] uppercase tracking-wider text-zinc-555 font-mono">
-                            {store.name} {store.brand && `// ${store.brand.toUpperCase()}`}
+                            {product.tenantId.replace('_official', '').toUpperCase()}
                           </span>
-                          <h4 className="text-xs font-bold text-zinc-200">{store.item}</h4>
+                          <h4 className="text-xs font-bold text-zinc-200">{product.googleMerchantFields.title}</h4>
+                          <p className="text-[9px] text-zinc-500 line-clamp-1">{product.googleMerchantFields.description}</p>
                         </div>
 
-                        <div className="mt-3 flex items-baseline space-x-2">
-                          <span className="text-sm font-extrabold text-white">
-                            ${finalPrice.toFixed(2)}
-                          </span>
-                          {discounts.total > 0 && (
-                            <span className="text-[10px] text-zinc-650 line-through">
-                              ${originalPrice.toFixed(2)}
-                            </span>
-                          )}
-                        </div>
-
-                        {(discounts.keywordBoost > 0 || discounts.sentimentBoost > 0 || discounts.leastSalesBoost > 0) && (
-                          <div className="mt-2 flex flex-col gap-0.5 text-[8px] font-mono">
-                            {discounts.keywordBoost > 0 && (
-                              <span className="text-emerald-400">
-                                +10% Keyword Match Boost
+                        {/* Real-time demand indicators */}
+                        {(searchVelocity > 0 || cartAdditions > 0) && (
+                          <div className="mt-2 flex gap-1.5 text-[8px] font-mono">
+                            {searchVelocity > 0 && (
+                              <span className="text-sky-400 bg-sky-950/30 px-1 py-0.5 rounded border border-sky-950/20">
+                                🔍 Search Vel: {searchVelocity}
                               </span>
                             )}
-                            {discounts.sentimentBoost > 0 && (
-                              <span className="text-purple-400">
-                                +15% Sentiment Target Boost
-                              </span>
-                            )}
-                            {discounts.leastSalesBoost > 0 && (
-                              <span className="text-amber-400">
-                                +15% Least Sales Boost
+                            {cartAdditions > 0 && (
+                              <span className="text-emerald-400 bg-emerald-950/30 px-1 py-0.5 rounded border border-emerald-950/20">
+                                🛒 Cart Adds: {cartAdditions}
                               </span>
                             )}
                           </div>
                         )}
 
+                        <div className="mt-3 flex items-baseline space-x-2">
+                          <span className="text-sm font-extrabold text-white">
+                            ${salePrice.toFixed(2)}
+                          </span>
+                          {isDiscounted && (
+                            <span className="text-[10px] text-zinc-655 line-through">
+                              ${originalPrice.toFixed(2)}
+                            </span>
+                          )}
+                        </div>
+
                         <div className="mt-4 space-y-1">
                           <div className="flex justify-between text-[9px] font-mono text-zinc-500">
                             <span>STOCK STATUS</span>
                             <span className={isCritical ? "text-rose-400 font-semibold" : "text-zinc-350"}>
-                              {store.current_stock} / {maxStock}
+                              {avail} (Buffer: {buffer})
                             </span>
                           </div>
                           <div className="h-1 w-full bg-zinc-900 rounded-full overflow-hidden">
                             <div 
                               className={`h-full ${isCritical ? "bg-rose-500/80" : "bg-emerald-500/80"} transition-all duration-300`} 
-                              style={{ width: `${Math.min(100, (store.current_stock / maxStock) * 100)}%` }}
+                              style={{ width: `${Math.min(100, (avail / (avail + 20)) * 100)}%` }}
                             />
                           </div>
                         </div>
 
                         <button 
-                          onClick={() => handleBuyItem(store.name, store.item)}
-                          disabled={store.current_stock <= 0}
-                          className="mt-4 w-full py-1.5 px-3 border border-zinc-805 hover:border-zinc-700 bg-zinc-900/60 hover:bg-zinc-850 text-zinc-200 text-[10px] font-semibold rounded cursor-pointer transition-all disabled:opacity-40 disabled:cursor-not-allowed select-none active:scale-[0.98]"
+                          onClick={() => handleRmnBuy("Zone_B", product.googleMerchantFields.g_mpn)}
+                          disabled={avail <= 0}
+                          className="mt-4 w-full py-1.5 px-3 border border-zinc-805 hover:border-zinc-700 bg-zinc-900/60 hover:bg-zinc-850 text-zinc-200 text-[10px] font-semibold rounded cursor-pointer transition-all disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98]"
                         >
-                          {store.current_stock <= 0 ? "OUT OF STOCK" : "BUY ITEM"}
+                          {avail <= 0 ? "OUT OF STOCK" : "BUY ITEM / ADD TO CART"}
                         </button>
                       </div>
                     );
                   })}
               </div>
+
+              {/* LIVE AUCTION LEDGER TERMINAL ZONE B */}
+              <div className="border border-zinc-900 bg-black/85 rounded-md overflow-hidden font-mono mt-2">
+                <div className="bg-zinc-900/60 border-b border-zinc-900 px-3 py-2 flex items-center justify-between">
+                  <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider">
+                    ⌨ Zone B programmatic RTB auction ledger
+                  </span>
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                </div>
+                <div className="p-3 text-[10px] text-zinc-300 space-y-2 max-h-[190px] overflow-y-auto leading-relaxed">
+                  {rmnLedgerB.length === 0 ? (
+                    <div className="text-zinc-650 italic">No auctions executed yet. Run a search to trigger.</div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="text-zinc-500 border-b border-zinc-900/50 pb-1 text-[9px]">
+                        Formula: Ad Rank = CPC Bid * QS * Multiplier ({rmnMultiplierB}x)
+                      </div>
+                      {rmnLedgerB.map((cand) => {
+                        const isWinner = cand.status === "WINNER";
+                        const isRunnerUp = cand.status === "RUNNER_UP";
+                        const isDisqualified = (cand.status || "").startsWith("DISQUALIFIED");
+                        
+                        return (
+                          <div key={cand.campaignId} className="flex flex-col border-b border-zinc-900/30 pb-1.5 last:border-0 last:pb-0">
+                            <div className="flex items-center justify-between">
+                              <span className={`${isWinner ? "text-violet-300 font-extrabold" : "text-zinc-455 font-bold"}`}>
+                                {cand.campaignId}
+                              </span>
+                              <span className={`px-1 rounded text-[8px] font-bold tracking-wider ${
+                                isWinner ? "bg-emerald-950/60 text-emerald-400 border border-emerald-800/30" : 
+                                isRunnerUp ? "bg-amber-950/60 text-amber-400 border border-amber-800/30" : 
+                                isDisqualified ? "bg-rose-950/30 text-rose-500/70 border border-rose-900/10" : "bg-zinc-900 text-zinc-400"
+                              }`}>
+                                {cand.status}
+                              </span>
+                            </div>
+                            {!isDisqualified ? (
+                              <div className="text-zinc-400 mt-0.5 text-[9px]">
+                                Bid: <span className="text-zinc-200 font-bold">${cand.maxBidPerClick.toFixed(2)}</span> | 
+                                QS: <span className="text-zinc-200 font-bold">{cand.qs.toFixed(1)}</span> | 
+                                Ad Rank: <span className="text-zinc-200 font-bold">{cand.adRank.toFixed(2)}</span>
+                              </div>
+                            ) : (
+                              <div className="text-rose-500/60 italic mt-0.5 text-[9px]">
+                                Disqualified: {cand.status === "DISQUALIFIED_STOCK_SHORTAGE" ? "Out of Stock (Safety Buffer)" : "No Rank"}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                      
+                      {/* Winner calculations */}
+                      {(() => {
+                        const winner = rmnLedgerB.find(c => c.status === "WINNER");
+                        const runnerUp = rmnLedgerB.find(c => c.status === "RUNNER_UP");
+                        if (winner) {
+                          const billedCpc = rmnSponsoredB ? rmnSponsoredB.actual_cpc : 0.05;
+                          return (
+                            <div className="mt-2 pt-2 border-t border-zinc-800/60 text-[8px] text-zinc-500 space-y-1 bg-zinc-950/30 p-2 rounded">
+                              <div className="text-zinc-400 font-bold uppercase tracking-wider text-[8px]">Programmatic Settlement (Vickrey):</div>
+                              {runnerUp ? (
+                                <div>
+                                  CPC = (Runner Up Ad Rank / (Winner QS * Multiplier)) + $0.01 <br />
+                                  CPC = ({runnerUp.adRank.toFixed(2)} / ({winner.qs.toFixed(1)} * {rmnMultiplierB})) + $0.01 = <span className="text-emerald-400 font-extrabold">${billedCpc.toFixed(2)}</span>
+                                </div>
+                              ) : (
+                                <div>
+                                  CPC = Max Bid or Default Flat Minimum = <span className="text-emerald-400 font-extrabold">${billedCpc.toFixed(2)}</span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
+                    </div>
+                  )}
+                </div>
+              </div>
+
             </div>
           </div>
         </main>
       )}
+
+      {activeTab === 'merchant' && (() => {
+        const merchantProfiles = [
+          { id: "nike_official", name: "Nike Official" },
+          { id: "starbucks_official", name: "Starbucks Official" },
+          { id: "redbull_official", name: "Red Bull Official" },
+          { id: "fifa_souvenirs", name: "FIFA Souvenirs" },
+          { id: "coop_partnership", name: "Co-Opetition Partnerships" }
+        ];
+
+        return (
+          <main className="flex-1 flex flex-col p-5 overflow-y-auto space-y-6">
+            <div className="shrink-0 flex items-center justify-between border-b border-zinc-900 pb-3">
+              <div>
+                <h2 className="text-sm font-bold uppercase tracking-wider text-zinc-300">
+                  Merchant Bidding & Campaign Management Deck
+                </h2>
+                <p className="text-[10px] text-zinc-500 font-mono mt-0.5">
+                  Set max CPC bids, budget limits, target geofence zones, and audience keywords. Update creative copy and view real-time delivery performance.
+                </p>
+              </div>
+              <div className="flex bg-zinc-950/60 p-1 rounded-md border border-zinc-900">
+                {merchantProfiles.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => {
+                      setMerchantTenant(p.id);
+                      setEditingCampaignId(null);
+                    }}
+                    className={`px-3 py-1.5 rounded-sm text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer select-none ${
+                      merchantTenant === p.id
+                        ? "bg-zinc-900/80 text-violet-400 border border-zinc-800/40 shadow-sm"
+                        : "text-zinc-500 hover:text-zinc-400"
+                    }`}
+                  >
+                    {p.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+              {/* LEFT 2 COLUMNS: CAMPAIGN STATS & LIST */}
+              <div className="xl:col-span-2 space-y-6">
+                {merchantCampaigns.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center p-12 border border-dashed border-zinc-900 rounded-lg bg-zinc-950/10 text-center">
+                    <svg className="h-10 w-10 text-zinc-700 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 002 2h2a2 2 0 002-2z" />
+                    </svg>
+                    <span className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">No Campaigns Seeded</span>
+                    <p className="text-[10px] text-zinc-650 mt-1 max-w-sm">
+                      {merchantTenant === "coop_partnership" 
+                        ? "No active joint campaigns found. Establish a partnership deal using the creator tool."
+                        : "Seeding RMN database will initialize active campaigns for this tenant segment."}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-5">
+                    {merchantCampaigns.map((camp) => {
+                      const spent = camp.dailyBudget - camp.remainingBudget;
+                      const ctr = camp.impressions > 0 ? (camp.clicks / camp.impressions) * 100 : 0;
+                      const isEditing = editingCampaignId === camp.campaignId;
+                      const isCoop = camp.isJoint;
+
+                      return (
+                        <div
+                          key={camp.campaignId}
+                          className={`border rounded-lg p-5 transition-all relative ${
+                            isEditing
+                              ? "border-violet-500/50 bg-zinc-950/90 shadow-[0_0_15px_rgba(139,92,246,0.1)]"
+                              : "border-zinc-900 bg-zinc-900/10 hover:border-zinc-850"
+                          }`}
+                        >
+                          {/* Header info */}
+                          <div className="flex items-start justify-between border-b border-zinc-900 pb-3 mb-4">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                {isCoop && (
+                                  <span className="bg-gradient-to-r from-violet-500 to-indigo-500 text-white text-[8px] font-extrabold px-1.5 py-0.5 rounded tracking-wider font-mono">
+                                    CO-OP BUNDLE
+                                  </span>
+                                )}
+                                <h3 className="text-xs font-bold text-white font-mono">{camp.campaignId}</h3>
+                                <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold tracking-wider uppercase font-mono ${
+                                  camp.status === "ELIGIBLE"
+                                    ? "bg-emerald-950/50 text-emerald-400 border border-emerald-900/30"
+                                    : "bg-zinc-900 text-zinc-500 border border-zinc-800"
+                                }`}>
+                                  {camp.status}
+                                </span>
+                              </div>
+                              {isCoop && (
+                                <p className="text-[9px] text-zinc-500 mt-1">
+                                  Partners: <span className="text-zinc-400">{camp.partnerTenants.join(" & ")}</span>
+                                </p>
+                              )}
+                            </div>
+                            {!isEditing && (
+                              <button
+                                onClick={() => startEditingCampaign(camp)}
+                                className="py-1 px-3 border border-zinc-800 hover:border-zinc-700 bg-zinc-900/60 hover:bg-zinc-800 text-[10px] font-bold rounded cursor-pointer transition-all active:scale-[0.98]"
+                              >
+                                EDIT DETAILS
+                              </button>
+                            )}
+                          </div>
+
+                          {/* If not editing, display read-only info */}
+                          {!isEditing ? (
+                            <div className="space-y-4">
+                              {/* Stats */}
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                                <div className="bg-zinc-950/40 border border-zinc-900/80 rounded p-2.5">
+                                  <div className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider font-mono">Impressions</div>
+                                  <div className="text-sm font-extrabold text-zinc-200 mt-0.5 font-mono">{camp.impressions}</div>
+                                </div>
+                                <div className="bg-zinc-950/40 border border-zinc-900/80 rounded p-2.5">
+                                  <div className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider font-mono">Clicks</div>
+                                  <div className="text-sm font-extrabold text-zinc-200 mt-0.5 font-mono">{camp.clicks}</div>
+                                </div>
+                                <div className="bg-zinc-950/40 border border-zinc-900/80 rounded p-2.5">
+                                  <div className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider font-mono">CTR</div>
+                                  <div className="text-sm font-extrabold text-zinc-200 mt-0.5 font-mono">{ctr.toFixed(2)}%</div>
+                                </div>
+                                <div className="bg-zinc-950/40 border border-zinc-900/80 rounded p-2.5">
+                                  <div className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider font-mono">Budget Spent</div>
+                                  <div className="text-sm font-extrabold text-zinc-200 mt-0.5 font-mono">
+                                    ${spent.toFixed(2)} <span className="text-[9px] text-zinc-500">/ ${camp.dailyBudget.toFixed(0)}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Campaign Details */}
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-[11px] leading-relaxed">
+                                <div>
+                                  <span className="text-zinc-500 uppercase tracking-wider font-bold block mb-1">Targeting Criteria</span>
+                                  <div className="space-y-1 font-mono">
+                                    <div>Zones: <span className="text-zinc-300">{(camp.targetingCriteria.targetZones || []).join(", ")}</span></div>
+                                    <div>Keywords: <span className="text-zinc-300">{(camp.targetingCriteria.audienceContextVectors || []).join(", ")}</span></div>
+                                  </div>
+                                </div>
+                                <div>
+                                  <span className="text-zinc-500 uppercase tracking-wider font-bold block mb-1">Max CPC Bid</span>
+                                  <div className="text-zinc-200 font-extrabold font-mono text-xs">
+                                    ${camp.maxBidPerClick.toFixed(2)}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Ad Creative Preview */}
+                              <div className="border border-zinc-900 bg-zinc-950/30 rounded p-3 relative">
+                                <span className="absolute -top-2 left-3 bg-zinc-950 px-1 text-[8px] text-zinc-500 font-bold tracking-wider uppercase font-mono">Ad Creative Preview</span>
+                                <div className="space-y-1 mt-1">
+                                  <h4 className="text-xs font-bold text-violet-300">{camp.creativeAsset.headline}</h4>
+                                  <p className="text-[10px] text-zinc-400">{camp.creativeAsset.body}</p>
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            /* Edit Panel Form */
+                            <div className="space-y-4 text-xs">
+                              <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                  <label className="block text-zinc-500 font-bold uppercase tracking-wider text-[9px] mb-1">Max Bid Per Click ($)</label>
+                                  <input
+                                    type="number"
+                                    step="0.05"
+                                    value={editMaxBid}
+                                    onChange={(e) => setEditMaxBid(parseFloat(e.target.value))}
+                                    className="w-full px-2.5 py-1.5 rounded bg-zinc-950 border border-zinc-850 focus:outline-none focus:border-zinc-700 text-zinc-200 font-mono"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-zinc-500 font-bold uppercase tracking-wider text-[9px] mb-1">Daily Budget ($)</label>
+                                  <input
+                                    type="number"
+                                    step="10"
+                                    value={editDailyBudget}
+                                    onChange={(e) => setEditDailyBudget(parseFloat(e.target.value))}
+                                    className="w-full px-2.5 py-1.5 rounded bg-zinc-950 border border-zinc-850 focus:outline-none focus:border-zinc-700 text-zinc-200 font-mono"
+                                  />
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                  <label className="block text-zinc-500 font-bold uppercase tracking-wider text-[9px] mb-1">Target Zones (Comma Separated)</label>
+                                  <input
+                                    type="text"
+                                    value={editZones}
+                                    onChange={(e) => setEditZones(e.target.value)}
+                                    className="w-full px-2.5 py-1.5 rounded bg-zinc-950 border border-zinc-850 focus:outline-none focus:border-zinc-700 text-zinc-200 font-mono"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-zinc-500 font-bold uppercase tracking-wider text-[9px] mb-1">Status</label>
+                                  <select
+                                    value={editStatus}
+                                    onChange={(e) => setEditStatus(e.target.value)}
+                                    className="w-full px-2.5 py-1.5 rounded bg-zinc-950 border border-zinc-850 focus:outline-none focus:border-zinc-700 text-zinc-200 font-mono cursor-pointer"
+                                  >
+                                    <option value="ELIGIBLE">ELIGIBLE</option>
+                                    <option value="PAUSED">PAUSED</option>
+                                  </select>
+                                </div>
+                              </div>
+
+                              <div>
+                                <label className="block text-zinc-500 font-bold uppercase tracking-wider text-[9px] mb-1">Targeting Keywords / Context Vectors (Comma Separated)</label>
+                                <input
+                                  type="text"
+                                  value={editKeywords}
+                                  onChange={(e) => setEditKeywords(e.target.value)}
+                                  className="w-full px-2.5 py-1.5 rounded bg-zinc-950 border border-zinc-850 focus:outline-none focus:border-zinc-700 text-zinc-200 font-mono"
+                                />
+                              </div>
+
+                              <div className="grid grid-cols-1 gap-2 pt-2 border-t border-zinc-900">
+                                <div>
+                                  <label className="block text-zinc-500 font-bold uppercase tracking-wider text-[9px] mb-1">Creative Headline</label>
+                                  <input
+                                    type="text"
+                                    value={editHeadline}
+                                    onChange={(e) => setEditHeadline(e.target.value)}
+                                    className="w-full px-2.5 py-1.5 rounded bg-zinc-950 border border-zinc-850 focus:outline-none focus:border-violet-500 text-zinc-200 font-mono"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-zinc-500 font-bold uppercase tracking-wider text-[9px] mb-1">Creative Body Copy</label>
+                                  <textarea
+                                    value={editBody}
+                                    onChange={(e) => setEditBody(e.target.value)}
+                                    rows={2}
+                                    className="w-full px-2.5 py-1.5 rounded bg-zinc-950 border border-zinc-850 focus:outline-none focus:border-violet-500 text-zinc-200 font-mono"
+                                  />
+                                </div>
+                              </div>
+
+                              <div className="flex justify-end gap-2 pt-3">
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingCampaignId(null)}
+                                  className="py-1.5 px-4 border border-zinc-800 hover:border-zinc-700 bg-zinc-900/30 hover:bg-zinc-900 text-zinc-400 text-[10px] font-bold rounded cursor-pointer transition-all active:scale-[0.98]"
+                                >
+                                  CANCEL
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCampaignUpdate(camp.campaignId)}
+                                  className="py-1.5 px-4 border border-violet-650 hover:border-violet-500 bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 text-[10px] font-bold rounded cursor-pointer transition-all active:scale-[0.98]"
+                                >
+                                  SAVE CHANGES
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* RIGHT COLUMN: JOINT CO-OP DEAL CREATOR */}
+              <div className="space-y-6">
+                <section className="border border-zinc-900 bg-zinc-900/10 rounded-lg p-5">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-200 border-b border-zinc-900 pb-2 mb-4">
+                    Co-Opetition Deal Builder
+                  </h3>
+                  <form onSubmit={handleCreateJointCampaign} className="space-y-4 text-xs">
+                    <div>
+                      <label className="block text-zinc-500 font-bold uppercase tracking-wider text-[9px] mb-1">Joint Campaign ID</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. camp_coop_nike_redbull"
+                        value={jointCampaignId}
+                        onChange={(e) => setJointCampaignId(e.target.value)}
+                        className="w-full px-3 py-2 rounded bg-zinc-950/75 border border-zinc-850 focus:outline-none focus:border-violet-500 text-zinc-200 font-mono"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-zinc-500 font-bold uppercase tracking-wider text-[9px] mb-2">Select Partner Tenants (Min 2)</label>
+                      <div className="space-y-1.5 font-mono">
+                        {[
+                          { id: "nike_official", name: "Nike Official" },
+                          { id: "starbucks_official", name: "Starbucks Official" },
+                          { id: "redbull_official", name: "Red Bull Official" },
+                          { id: "fifa_souvenirs", name: "FIFA Souvenirs" }
+                        ].map((t) => {
+                          const isChecked = jointPartners.includes(t.id);
+                          return (
+                            <label key={t.id} className="flex items-center space-x-2 text-zinc-300 cursor-pointer select-none">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => {
+                                  if (isChecked) {
+                                    setJointPartners(jointPartners.filter((p) => p !== t.id));
+                                  } else {
+                                    setJointPartners([...jointPartners, t.id]);
+                                  }
+                                }}
+                                className="rounded bg-zinc-950 border-zinc-850 text-violet-500 focus:ring-0 cursor-pointer"
+                              />
+                              <span>{t.name}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-zinc-500 font-bold uppercase tracking-wider text-[9px] mb-1">Max CPC Bid ($)</label>
+                        <input
+                          type="number"
+                          step="0.05"
+                          value={jointMaxBid}
+                          onChange={(e) => setJointMaxBid(parseFloat(e.target.value))}
+                          className="w-full px-3 py-2 rounded bg-zinc-950/75 border border-zinc-850 focus:outline-none focus:border-violet-500 text-zinc-200 font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-zinc-500 font-bold uppercase tracking-wider text-[9px] mb-1">Daily Budget ($)</label>
+                        <input
+                          type="number"
+                          step="10"
+                          value={jointDailyBudget}
+                          onChange={(e) => setJointDailyBudget(parseFloat(e.target.value))}
+                          className="w-full px-3 py-2 rounded bg-zinc-950/75 border border-zinc-850 focus:outline-none focus:border-violet-500 text-zinc-200 font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-zinc-500 font-bold uppercase tracking-wider text-[9px] mb-1">Target Zones (Comma Separated)</label>
+                        <input
+                          type="text"
+                          value={jointZones}
+                          onChange={(e) => setJointZones(e.target.value)}
+                          className="w-full px-3 py-2 rounded bg-zinc-950/75 border border-zinc-850 focus:outline-none focus:border-violet-500 text-zinc-200 font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-zinc-500 font-bold uppercase tracking-wider text-[9px] mb-1">Targeting Keywords</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. exhausted, energy"
+                          value={jointKeywords}
+                          onChange={(e) => setJointKeywords(e.target.value)}
+                          className="w-full px-3 py-2 rounded bg-zinc-950/75 border border-zinc-850 focus:outline-none focus:border-violet-500 text-zinc-200 font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-zinc-900 font-sans">
+                      <div>
+                        <label className="block text-zinc-500 font-bold uppercase tracking-wider text-[9px] mb-1">Joint Headline</label>
+                        <input
+                          type="text"
+                          placeholder="Headline copy..."
+                          value={jointHeadline}
+                          onChange={(e) => setJointHeadline(e.target.value)}
+                          className="w-full px-3 py-2 rounded bg-zinc-950/75 border border-zinc-850 focus:outline-none focus:border-violet-500 text-zinc-200"
+                        />
+                      </div>
+                      <div className="mt-2">
+                        <label className="block text-zinc-500 font-bold uppercase tracking-wider text-[9px] mb-1">Joint Body Copy</label>
+                        <textarea
+                          placeholder="Bundle discount offer body copy..."
+                          value={jointBody}
+                          onChange={(e) => setJointBody(e.target.value)}
+                          rows={3}
+                          className="w-full px-3 py-2 rounded bg-zinc-950/75 border border-zinc-850 focus:outline-none focus:border-violet-500 text-zinc-200"
+                        />
+                      </div>
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="w-full py-2.5 border border-violet-650 hover:border-violet-500 bg-violet-600/10 hover:bg-violet-600/25 text-violet-300 text-xs font-bold rounded cursor-pointer transition-all active:scale-[0.98]"
+                    >
+                      ESTABLISH JOINT CAMPAIGN DEAL
+                    </button>
+                  </form>
+                </section>
+
+                <section className="border border-zinc-900 bg-zinc-900/10 rounded-lg p-5 text-[11px] leading-relaxed text-zinc-400 space-y-2">
+                  <span className="font-bold text-zinc-200 uppercase block tracking-wider text-[9px] mb-2 font-mono">⚡ How Joint Billing Works</span>
+                  <p>
+                    Programmatic RMN Vickrey Settlement splits the billed CPC cost equally between all participating partner campaigns.
+                  </p>
+                  <p>
+                    For example, if the winning co-op ad CPC is settled at $1.50, then $0.75 is atomically deducted from both partner merchant's primary campaign budgets.
+                  </p>
+                  <p>
+                    This stimulates cross-tenant co-opetitive marketing, bringing down single-merchant customer acquisition costs while preserving campaign margins.
+                  </p>
+                </section>
+              </div>
+            </div>
+          </main>
+        );
+      })()}
 
       {/* FOOTER */}
       <footer className="shrink-0 h-8 bg-zinc-950 border-t border-zinc-900 px-6 flex items-center justify-between text-[10px] text-zinc-600 select-none font-mono">

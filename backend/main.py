@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from bson import ObjectId
 
-from db import db, init_db, raw_db
+from db import db, init_db, raw_db, client
 from agent import generate_promotion
 from seed import seed_data
 from tenancy import set_current_tenant_id, get_current_tenant_id, set_global_default_tenant
@@ -86,10 +86,22 @@ def start_background_jobs():
             except Exception as e:
                 print(f"[Rollup Job Error] {e}")
 
+    def rmn_flusher_loop():
+        add_log("[Background Service] RMN 5s asynchronous flusher thread active.")
+        from rmn_engine import flush_rmn_events
+        while True:
+            try:
+                time.sleep(5)
+                flush_rmn_events()
+            except Exception as e:
+                print(f"[RMN Flusher Error] {e}")
+
     t1 = threading.Thread(target=edge_flusher_loop, daemon=True)
     t2 = threading.Thread(target=rollup_loop, daemon=True)
+    t3 = threading.Thread(target=rmn_flusher_loop, daemon=True)
     t1.start()
     t2.start()
+    t3.start()
 
 
 # ==========================================
@@ -171,6 +183,369 @@ async def create_vector_campaign(payload: CreateCampaignPayload):
         add_log(f"A/B Campaign generation failure: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ==========================================
+# 6. NEXUS RETAIL MEDIA NETWORK (NEX-RMN) ENDPOINTS
+# ==========================================
+class RmnEventPayload(BaseModel):
+    type: str = Field(..., description="event type: search or cart_add")
+    zoneId: str = Field(..., description="Zone_A or Zone_B")
+    targetItemMpn: str = Field(..., description="g_mpn of the product")
+    weight: int = Field(1, description="Event weight")
+
+class RmnPurchasePayload(BaseModel):
+    zoneId: str = Field(..., description="Zone_A or Zone_B")
+    targetItemMpn: str = Field(..., description="g_mpn of the product")
+    quantity: int = Field(1, description="Quantity to purchase")
+
+def is_replica_set() -> bool:
+    try:
+        raw_db.command("replSetGetStatus")
+        return True
+    except Exception:
+        return False
+
+def process_rmn_purchase_or_cart_logic(zone_id: str, mpn: str, quantity: int) -> dict:
+    if is_replica_set():
+        with client.start_session() as session:
+            with session.start_transaction():
+                product = raw_db.google_shopping_products.find_one(
+                    {"zoneId": zone_id, "googleMerchantFields.g_mpn": mpn},
+                    session=session
+                )
+                if not product:
+                    raise ValueError(f"Product with MPN '{mpn}' in zone '{zone_id}' not found.")
+                
+                avail = product["inventory_metrics"]["availableStock"]
+                buffer = product["inventory_metrics"]["safetyBuffer"]
+                
+                if avail < quantity:
+                    raise ValueError(f"Insufficient stock: {avail} available, requested {quantity}.")
+                
+                new_avail = avail - quantity
+                new_allocated = product["inventory_metrics"].get("allocatedInCarts", 0) + quantity
+                
+                raw_db.google_shopping_products.update_one(
+                    {"_id": product["_id"]},
+                    {
+                        "$set": {
+                            "inventory_metrics.availableStock": new_avail,
+                            "inventory_metrics.allocatedInCarts": new_allocated
+                        }
+                    },
+                    session=session
+                )
+                
+                return {
+                    "new_availableStock": new_avail,
+                    "new_allocatedInCarts": new_allocated,
+                    "is_shortage": new_avail <= buffer
+                }
+    else:
+        # Standalone fallback using single-query atomic update
+        product = raw_db.google_shopping_products.find_one(
+            {"zoneId": zone_id, "googleMerchantFields.g_mpn": mpn}
+        )
+        if not product:
+            raise ValueError(f"Product with MPN '{mpn}' in zone '{zone_id}' not found.")
+        
+        avail = product["inventory_metrics"]["availableStock"]
+        if avail < quantity:
+            raise ValueError(f"Insufficient stock: {avail} available, requested {quantity}.")
+            
+        result = raw_db.google_shopping_products.update_one(
+            {
+                "zoneId": zone_id,
+                "googleMerchantFields.g_mpn": mpn,
+                "inventory_metrics.availableStock": {"$gte": quantity}
+            },
+            {
+                "$inc": {
+                    "inventory_metrics.availableStock": -quantity,
+                    "inventory_metrics.allocatedInCarts": quantity
+                }
+            }
+        )
+        if result.modified_count == 0:
+            raise ValueError("Reserve failed due to concurrency or stock conditions.")
+            
+        updated_prod = raw_db.google_shopping_products.find_one(
+            {"zoneId": zone_id, "googleMerchantFields.g_mpn": mpn}
+        )
+        new_avail = updated_prod["inventory_metrics"]["availableStock"]
+        buffer = updated_prod["inventory_metrics"]["safetyBuffer"]
+        
+        return {
+            "new_availableStock": new_avail,
+            "new_allocatedInCarts": updated_prod["inventory_metrics"]["allocatedInCarts"],
+            "is_shortage": new_avail <= buffer
+        }
+
+@app.get("/api/rmn/products")
+async def get_rmn_products(zoneId: str, query: str = ""):
+    try:
+        from rmn_engine import run_rtb_auction
+        # Execute RTB auction dynamically on each request to determine sponsor/pricing
+        winner = run_rtb_auction(zoneId, query)
+        
+        # Retrieve all products for this zone
+        products = list(raw_db.google_shopping_products.find({"zoneId": zoneId}))
+        
+        # Serialize ObjectId to string
+        for prod in products:
+            prod["_id"] = str(prod["_id"])
+            
+        winner_data = None
+        ledger = []
+        traffic_multiplier = 1.0
+        visitors = 0
+        
+        if winner:
+            winner_data = dict(winner)
+            if winner_data.get("product"):
+                prod_copy = dict(winner_data["product"])
+                prod_copy["_id"] = str(prod_copy["_id"])
+                winner_data["product"] = prod_copy
+            ledger = winner_data.get("ledger", [])
+            traffic_multiplier = winner_data.get("trafficMultiplier", 1.0)
+            visitors = winner_data.get("zoneVisitors", 0)
+        else:
+            from edge_compute import get_zone_visitor_count
+            try:
+                visitors = get_zone_visitor_count(zoneId.lower())
+            except Exception:
+                pass
+            traffic_multiplier = 1.5 if visitors >= 5 else 1.0
+                
+        add_log(f"RMN Auction execution: zone={zoneId}, query='{query}', winner={winner_data.get('campaignId') if winner_data else 'None'}")
+        
+        return {
+            "products": products,
+            "sponsored": winner_data,
+            "logs": pipeline_logs,
+            "ledger": ledger,
+            "trafficMultiplier": traffic_multiplier,
+            "zoneVisitors": visitors
+        }
+    except Exception as e:
+        add_log(f"Failed to retrieve RMN products: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/rmn/event")
+async def log_rmn_event(payload: RmnEventPayload):
+    try:
+        event_doc = {
+            "timestamp": datetime.now(timezone.utc),
+            "type": payload.type,
+            "zoneId": payload.zoneId,
+            "targetItemMpn": payload.targetItemMpn,
+            "weight": payload.weight
+        }
+        raw_db.rmn_asynchronous_events.insert_one(event_doc)
+        add_log(f"[RMN Event Logged] Type: {payload.type}, Zone: {payload.zoneId}, MPN: {payload.targetItemMpn}, Weight: {payload.weight}")
+        return {"status": "success", "message": "Event successfully buffered."}
+    except Exception as e:
+        add_log(f"Failed to log RMN event: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/rmn/purchase")
+async def process_rmn_purchase(payload: RmnPurchasePayload):
+    try:
+        result = process_rmn_purchase_or_cart_logic(payload.zoneId, payload.targetItemMpn, payload.quantity)
+        
+        # Buffer a cart_add event in parallel for weight metrics
+        raw_db.rmn_asynchronous_events.insert_one({
+            "timestamp": datetime.now(timezone.utc),
+            "type": "cart_add",
+            "zoneId": payload.zoneId,
+            "targetItemMpn": payload.targetItemMpn,
+            "weight": 5 * payload.quantity
+        })
+        
+        if result["is_shortage"]:
+            # Localized shortage: broadcast to drop Quality Score to 0
+            product = raw_db.google_shopping_products.find_one(
+                {"zoneId": payload.zoneId, "googleMerchantFields.g_mpn": payload.targetItemMpn}
+            )
+            buffer = product["inventory_metrics"]["safetyBuffer"]
+            add_log(
+                f"[BROADCAST INSTRUCTION] Inventory shortage detected for item '{payload.targetItemMpn}' in '{payload.zoneId}' "
+                f"(Available: {result['new_availableStock']} <= Buffer: {buffer}). "
+                f"Setting Quality Score multiplier to 0.0 network-wide."
+            )
+        else:
+            add_log(f"RMN purchase executed successfully for '{payload.targetItemMpn}' in '{payload.zoneId}' (Qty: {payload.quantity}).")
+            
+        return {
+            "status": "success",
+            "message": "Transaction completed successfully.",
+            "data": result
+        }
+    except ValueError as ve:
+        add_log(f"RMN purchase rejected: {ve}")
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        add_log(f"Internal error executing RMN purchase: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/rmn/flush")
+async def trigger_rmn_flush():
+    try:
+        from rmn_engine import flush_rmn_events
+        flush_rmn_events()
+        add_log("Manual trigger: RMN Event Flusher run.")
+        return {"status": "success", "message": "RMN event buffer successfully flushed."}
+    except Exception as e:
+        add_log(f"Manual RMN flush failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+class RmnCampaignUpdatePayload(BaseModel):
+    campaignId: str
+    maxBidPerClick: float
+    dailyBudget: float
+    targetingCriteria: Dict[str, Any]
+    creativeAsset: Dict[str, Any]
+    status: str
+
+class RmnClickPayload(BaseModel):
+    campaignId: str
+
+class RmnJointCampaignPayload(BaseModel):
+    campaignId: str
+    partnerTenants: List[str]
+    maxBidPerClick: float
+    dailyBudget: float
+    targetingCriteria: Dict[str, Any]
+    creativeAsset: Dict[str, Any]
+
+@app.get("/api/rmn/campaigns")
+async def get_rmn_campaigns(tenantId: str = ""):
+    try:
+        query = {}
+        if tenantId:
+            # Handle co-op/joint campaign fetches too
+            if tenantId == "coop_partnership":
+                query["isJoint"] = True
+            else:
+                query["$or"] = [
+                    {"tenantId": tenantId},
+                    {"partnerTenants": tenantId}
+                ]
+        camps = list(raw_db.google_ads_campaigns.find(query))
+        for c in camps:
+            c["_id"] = str(c["_id"])
+        return camps
+    except Exception as e:
+        add_log(f"Failed to fetch RMN campaigns: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/rmn/campaigns/update")
+async def update_rmn_campaign(payload: RmnCampaignUpdatePayload):
+    try:
+        result = raw_db.google_ads_campaigns.update_one(
+            {"campaignId": payload.campaignId},
+            {"$set": {
+                "maxBidPerClick": payload.maxBidPerClick,
+                "dailyBudget": payload.dailyBudget,
+                "targetingCriteria": payload.targetingCriteria,
+                "creativeAsset": payload.creativeAsset,
+                "status": payload.status
+            }}
+        )
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Campaign not found")
+        add_log(f"[RMN Campaign Update] Campaign '{payload.campaignId}' modified successfully.")
+        return {"status": "success", "message": "Campaign updated successfully."}
+    except Exception as e:
+        add_log(f"Failed to update RMN campaign: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/rmn/click")
+async def log_rmn_click(payload: RmnClickPayload):
+    try:
+        # Increment click on the winning campaign
+        raw_db.google_ads_campaigns.update_one(
+            {"campaignId": payload.campaignId},
+            {"$inc": {"clicks": 1}}
+        )
+        # Also increment click on any partner campaigns if it is a joint campaign
+        winner_camp = raw_db.google_ads_campaigns.find_one({"campaignId": payload.campaignId})
+        if winner_camp and winner_camp.get("isJoint"):
+            partner_tenants = winner_camp.get("partnerTenants", [])
+            for pt in partner_tenants:
+                raw_db.google_ads_campaigns.update_one(
+                    {"tenantId": pt, "isJoint": {"$ne": True}},
+                    {"$inc": {"clicks": 1}}
+                )
+        add_log(f"[RMN Click Logged] Clicks incremented for campaign '{payload.campaignId}'")
+        return {"status": "success", "message": "Click registered."}
+    except Exception as e:
+        add_log(f"Failed to register click: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/rmn/campaigns/create-joint")
+async def create_rmn_joint_campaign(payload: RmnJointCampaignPayload):
+    try:
+        doc = {
+            "campaignId": payload.campaignId,
+            "tenantId": "coop_partnership",
+            "isJoint": True,
+            "partnerTenants": payload.partnerTenants,
+            "biddingStrategy": "Target_ROAS",
+            "maxBidPerClick": payload.maxBidPerClick,
+            "dailyBudget": payload.dailyBudget,
+            "remainingBudget": payload.dailyBudget,
+            "status": "ELIGIBLE",
+            "targetingCriteria": payload.targetingCriteria,
+            "creativeAsset": payload.creativeAsset,
+            "impressions": 0,
+            "clicks": 0
+        }
+        raw_db.google_ads_campaigns.insert_one(doc)
+        add_log(f"[RMN Joint Campaign Created] Partnership: {payload.partnerTenants}, Bid: {payload.maxBidPerClick}")
+        return {"status": "success", "message": "Joint campaign created successfully."}
+    except Exception as e:
+        add_log(f"Failed to create joint campaign: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+class RmnSimulateTrafficPayload(BaseModel):
+    zoneId: str
+    count: int
+
+@app.post("/api/rmn/simulate-traffic")
+async def simulate_rmn_traffic(payload: RmnSimulateTrafficPayload):
+    try:
+        zone_id = payload.zoneId.lower()
+        # Remove existing dummy devices for this zone to avoid duplicate build-up
+        raw_db.devices.delete_many({"dummy_zone": zone_id})
+        
+        # Coordinates inside the seeded polygons
+        if zone_id == "zone_a":
+            coords = [121.501, 31.240]
+        elif zone_id == "zone_b":
+            coords = [121.515, 31.245]
+        else:
+            coords = [121.500, 31.240]
+            
+        if payload.count > 0:
+            devices_to_insert = []
+            for i in range(payload.count):
+                devices_to_insert.append({
+                    "anonymousHash": f"dummy_device_{zone_id}_{i}",
+                    "location": {
+                        "type": "Point",
+                        "coordinates": [coords[0] + (i * 0.0001), coords[1] + (i * 0.0001)]
+                    },
+                    "tenantId": "default_tenant", # fallback context
+                    "dummy_zone": zone_id
+                })
+            raw_db.devices.insert_many(devices_to_insert)
+            
+        add_log(f"[RMN Traffic Simulator] Set {payload.count} visitors in zone {zone_id}")
+        return {"status": "success", "visitorCount": payload.count}
+    except Exception as e:
+        add_log(f"Failed to simulate RMN traffic: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ==========================================
 # 3. TRANSACTIONAL COUPON CLAIM ENDPOINT

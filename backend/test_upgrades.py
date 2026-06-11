@@ -388,5 +388,77 @@ class TestAntigravityUpgrades(unittest.TestCase):
         
         print("[SUCCESS] Dynamic purchase dynamic stock scaling, sales tracking, least-sales promotion triggering, and auto-expiration verified.")
 
+    # ==========================================
+    # UPGRADE NEX-RMN: RETAIL MEDIA NETWORK TESTS
+    # ==========================================
+    def test_rmn_auction_and_yield_pricing(self):
+        print("\n--- Running NEX-RMN: Retail Media Network & Programmatic RTB Auction Tests ---")
+        from seed import seed_data
+        from rmn_engine import run_rtb_auction, flush_rmn_events, calculate_yield_price
+        
+        # 1. Reset database and seed compliant RMN feeds and campaigns
+        seed_data()
+        
+        # A. Execute RTB auction in Zone_A with no query context
+        # Winning campaign should pay Vickrey second-price CPC.
+        winner = run_rtb_auction("Zone_A", query_text="")
+        self.assertIsNotNone(winner)
+        self.assertEqual(winner["campaignId"], "camp_nike_poncho")
+        self.assertEqual(winner["actual_cpc"], 1.51)
+        
+        # Budget decrement check
+        poncho_camp = raw_db.google_ads_campaigns.find_one({"campaignId": "camp_nike_poncho"})
+        self.assertEqual(poncho_camp["remainingBudget"], 450.00 - 1.51)
+        
+        # B. Test Sentiment Fit query matching
+        winner_sentiment = run_rtb_auction("Zone_A", query_text="Looking for a match jersey")
+        self.assertEqual(winner_sentiment["campaignId"], "camp_nike_jersey")
+        
+        # C. Test Yield pricing scarcity & stimulation rules
+        poncho_prod = raw_db.google_shopping_products.find_one({"googleMerchantFields.g_mpn": "US-PONCHO-01"})
+        
+        # Default: 15% off base price of 45.00 => 38.25
+        p_default = calculate_yield_price(poncho_prod, search_vel=0, cart_adds=0)
+        self.assertEqual(p_default, 38.25)
+        
+        # High-Velocity Scarcity Rule
+        low_stock_prod = dict(poncho_prod)
+        low_stock_prod["inventory_metrics"] = {"availableStock": 30, "safetyBuffer": 20, "allocatedInCarts": 0}
+        p_scarcity = calculate_yield_price(low_stock_prod, search_vel=12, cart_adds=1)
+        self.assertEqual(p_scarcity, 42.75)
+        
+        # Low-Conversion Stimulation Rule
+        p_stimulation = calculate_yield_price(poncho_prod, search_vel=6, cart_adds=0)
+        self.assertEqual(p_stimulation, 31.50)
+        
+        # D. Test Event Buffer & Decoupled Flush Loop
+        raw_db.rmn_asynchronous_events.delete_many({})
+        raw_db.rmn_asynchronous_events.insert_one({
+            "timestamp": datetime.now(timezone.utc),
+            "type": "search",
+            "zoneId": "Zone_A",
+            "targetItemMpn": "US-JER-2026",
+            "weight": 10
+        })
+        
+        flush_rmn_events()
+        
+        jersey_prod = raw_db.google_shopping_products.find_one({"googleMerchantFields.g_mpn": "US-JER-2026"})
+        self.assertEqual(jersey_prod["realtime_demand"]["searchVelocity30s"], 10)
+        self.assertEqual(jersey_prod["googleMerchantFields"]["sale_price"], 84.00)
+        
+        # E. Closed-Loop Inventory Scarcity / Quality Score drop
+        from main import process_rmn_purchase_or_cart_logic
+        res = process_rmn_purchase_or_cart_logic("Zone_B", "SBX-COLDBREW", quantity=4)
+        self.assertTrue(res["is_shortage"])
+        self.assertEqual(res["new_availableStock"], 4)
+        
+        # Starbucks campaign is now excluded due to low stock, Red Bull energy wins
+        winner_zone_b = run_rtb_auction("Zone_B", query_text="")
+        self.assertIsNotNone(winner_zone_b)
+        self.assertEqual(winner_zone_b["campaignId"], "camp_redbull_energy")
+        
+        print("[SUCCESS] Vickrey auctions, yield scarcity modulations, decoupled flushing, and critical inventory QS stripping verified.")
+
 if __name__ == "__main__":
     unittest.main()
